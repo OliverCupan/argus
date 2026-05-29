@@ -1,21 +1,23 @@
 """
 CLI interface for Argus.
 
-Phase 1: Single Coder agent with all four tools.
+Phase 1: single Coder agent  — free-form tasks
+Phase 2: Orchestrator routes  — 'audit <path>' or free-form coding tasks
 """
 
 import os
 
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.markdown import Markdown
+from rich.spinner import Spinner
 from rich.table import Table
+from rich.text import Text
 
 from src.config import ArgusConfig
-from src.core.llm_client import LLMClient
 from src.core.token_tracker import TokenTracker
-from src.tools.registry import build_registry
-from src.agents.coder import Coder
+from src.agents.orchestrator import Orchestrator
 
 console = Console()
 
@@ -24,30 +26,36 @@ class ArgusCliApp:
     def __init__(self, config: ArgusConfig):
         self.config = config
         self.token_tracker = TokenTracker(config.token_budget)
+        self._current_status = "Working…"
 
-        # REVIEW confirmation callback — prompts inline, runs in the event loop
+        # REVIEW confirmation callback — prompts inline
         async def confirm_callback(command: str) -> bool:
             console.print(
-                f"\n[yellow bold]⚠  REVIEW REQUIRED[/yellow bold]\n"
+                f"\n[yellow bold]  REVIEW REQUIRED[/yellow bold]\n"
                 f"  The agent wants to run:\n"
                 f"  [bold]{command}[/bold]"
             )
             answer = console.input("  Allow? [y/N] ").strip().lower()
             return answer in ("y", "yes")
 
-        self.llm = LLMClient(config)
-        self.tools = build_registry(config, confirm_callback=confirm_callback)
-        self.coder = Coder(config, self.llm, self.token_tracker, self.tools)
+        # Status callback — updates the live spinner message
+        async def status_callback(message: str) -> None:
+            self._current_status = message
+
+        self.orchestrator = Orchestrator(
+            config,
+            self.token_tracker,
+            confirm_callback=confirm_callback,
+            status_callback=status_callback,
+        )
 
     async def run(self):
         """Main input loop."""
         self._print_banner()
-
         try:
             await self._input_loop()
         finally:
-            # Clean up the httpx client to avoid ResourceWarning
-            await self.llm.close()
+            await self.orchestrator.close()
 
     async def _input_loop(self):
         while True:
@@ -59,48 +67,66 @@ class ArgusCliApp:
 
             if not user_input:
                 continue
-
             if user_input.lower() in ("exit", "quit"):
                 console.print("[dim]Goodbye.[/dim]")
                 return
-
             if user_input.lower() == "stats":
                 self._print_stats()
                 continue
 
-            # Inject working directory so the agent knows where relative paths resolve
+            # Inject cwd for relative path awareness (passed to orchestrator,
+            # which injects it into the first user message via Coder)
             cwd = os.getcwd()
             augmented = f"[Working directory: {cwd}]\n\n{user_input}"
 
-            console.print("[dim]Agent working…[/dim]")
+            # Show live spinner while agents work
+            result_text = ""
+            self._current_status = "Starting…"
+
             try:
-                result = await self.coder.run(augmented)
+                with Live(self._make_status_panel(), console=console, refresh_per_second=4) as live:
+                    # Patch status callback to also refresh live panel
+                    orig_status = self.orchestrator._status
+
+                    async def live_status(message: str) -> None:
+                        self._current_status = message
+                        live.update(self._make_status_panel())
+
+                    self.orchestrator._status = live_status
+                    try:
+                        result_text = await self.orchestrator.handle(augmented)
+                    finally:
+                        self.orchestrator._status = orig_status
             except KeyboardInterrupt:
                 console.print("\n[yellow]Interrupted.[/yellow]")
                 continue
 
-            self._print_response(result.content)
+            self._print_response(result_text)
 
-            # Brief per-response stats
-            total_tokens = result.total_input_tokens + result.total_output_tokens
+            # Brief per-request token summary
+            summary = self.token_tracker.get_summary()
             console.print(
-                f"[dim]  {result.iterations} iteration(s) · "
-                f"{total_tokens:,} tokens this request[/dim]"
+                f"[dim]  Total session: {summary['total_tokens']:,} tokens · "
+                f"${summary['total_cost_usd']:.4f} · "
+                f"{summary['percent_used']}% of budget[/dim]"
             )
 
-            # Surface any budget warnings
-            summary = self.token_tracker.get_summary()
+            # Surface budget warnings
             if summary["warnings"]:
                 console.print(
-                    f"[yellow bold]Warning:[/yellow bold] "
-                    f"[yellow]Token budget at {summary['percent_used']}% "
+                    f"[yellow bold]Warning:[/yellow bold] [yellow]"
+                    f"Token budget at {summary['percent_used']}% "
                     f"({summary['total_tokens']:,} / {summary['hard_cap']:,})[/yellow]"
                 )
 
+    def _make_status_panel(self) -> Panel:
+        spinner = Spinner("dots", text=Text(f" {self._current_status}", style="green"))
+        return Panel(spinner, border_style="dim", padding=(0, 1))
+
     def _print_banner(self):
         console.print(Panel(
-            "[bold cyan]Argus[/bold cyan] — Coding Assistant  [dim](Phase 1)[/dim]\n"
-            "[dim]Commands: free-form tasks, 'stats', 'exit'[/dim]",
+            "[bold cyan]Argus[/bold cyan] — Multi-Agent Coding Assistant\n"
+            "[dim]Commands: free-form tasks · 'audit <path>' · 'stats' · 'exit'[/dim]",
             border_style="cyan",
             padding=(0, 2),
         ))
