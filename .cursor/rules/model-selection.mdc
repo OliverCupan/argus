@@ -1,0 +1,17 @@
+---
+description: Model selection policy for Argus development
+alwaysApply: true
+---
+
+# Model Selection
+
+Always follow this rule when choosing which model to use:
+
+| Mode | Model |
+|------|-------|
+| Planning, research, reviewing, auditing, multi-pass analysis | **claude-opus-4-6** (Opus 4.6) |
+| Building, executing, implementing, editing files, running commands | **claude-sonnet-4-6** (Sonnet 4.6) |
+
+- Use **Opus 4.6** when in Plan mode, doing deep analysis, or reviewing code for correctness.
+- Use **Sonnet 4.6** when in Agent mode, writing code, running tests, or making file edits.
+- Never substitute a different model without explicit user approval.
