@@ -27,15 +27,24 @@ class ArgusCliApp:
         self.config = config
         self.token_tracker = TokenTracker(config.token_budget)
         self._current_status = "Working…"
+        self._live: Live | None = None  # reference to active Live, so callbacks can pause it
 
-        # REVIEW confirmation callback — prompts inline
+        # REVIEW confirmation callback — pauses the spinner, prompts, then resumes
         async def confirm_callback(command: str) -> bool:
+            # Stop the Live spinner so console.input() can take over the terminal
+            if self._live:
+                self._live.stop()
             console.print(
                 f"\n[yellow bold]  REVIEW REQUIRED[/yellow bold]\n"
                 f"  The agent wants to run:\n"
                 f"  [bold]{command}[/bold]"
             )
-            answer = console.input("  Allow? [y/N] ").strip().lower()
+            try:
+                answer = console.input("  Allow? [y/N] ").strip().lower()
+            finally:
+                # Resume the spinner after input is done
+                if self._live:
+                    self._live.start()
             return answer in ("y", "yes")
 
         # Status callback — updates the live spinner message
@@ -85,7 +94,7 @@ class ArgusCliApp:
 
             try:
                 with Live(self._make_status_panel(), console=console, refresh_per_second=4) as live:
-                    # Patch status callback to also refresh live panel
+                    self._live = live  # expose to confirm_callback so it can pause/resume
                     orig_status = self.orchestrator._status
 
                     async def live_status(message: str) -> None:
@@ -97,6 +106,7 @@ class ArgusCliApp:
                         result_text = await self.orchestrator.handle(augmented)
                     finally:
                         self.orchestrator._status = orig_status
+                        self._live = None
             except KeyboardInterrupt:
                 console.print("\n[yellow]Interrupted.[/yellow]")
                 continue
