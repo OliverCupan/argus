@@ -19,7 +19,7 @@ from src.config import ArgusConfig
 from src.core.token_tracker import TokenTracker
 from src.agents.orchestrator import Orchestrator
 
-console = Console()
+console = Console(force_terminal=True)
 
 
 class ArgusCliApp:
