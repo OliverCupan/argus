@@ -30,8 +30,8 @@ def get_users():
     name = request.args.get("name", "")
 
     conn = get_db()
-    # BUG 2: SQL injection — string interpolation in query
-    cursor = conn.execute(f"SELECT * FROM users WHERE name = '{name}'")
+    # Fixed: Use parameterized query to prevent SQL injection
+    cursor = conn.execute("SELECT * FROM users WHERE name = ?", (name,))
     users = cursor.fetchall()
     conn.close()
 
