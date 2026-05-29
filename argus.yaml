@@ -1,0 +1,60 @@
+# Argus Configuration
+
+models:
+  orchestrator: claude-sonnet-4-20250514
+  challenger: claude-sonnet-4-20250514
+  coder: claude-sonnet-4-20250514
+  explorer: claude-haiku-4-5-20251001
+  security_auditor: claude-sonnet-4-20250514
+  bug_auditor: claude-sonnet-4-20250514
+  performance_auditor: claude-haiku-4-5-20251001
+  test_auditor: claude-haiku-4-5-20251001
+
+api:
+  provider: anthropic  # anthropic | openai
+  base_url: null       # override for custom endpoints
+  max_retries: 3
+  timeout: 60
+
+token_budget:
+  total_hard_cap: 500000
+  warning_threshold: 0.8  # warn at 80% of budget
+  per_agent:
+    orchestrator: 100000
+    challenger: 50000
+    coder: 150000
+    explorer: 30000
+    security_auditor: 50000
+    bug_auditor: 50000
+    performance_auditor: 30000
+    test_auditor: 30000
+
+context:
+  max_history_tokens: 50000
+  compaction_threshold: 3000    # compact tool outputs above this token count
+  compaction_model: claude-haiku-4-5-20251001
+
+safety:
+  blocked_commands:
+    - "rm -rf /"
+    - "rm -rf ~"
+    - "sudo"
+    - "mkfs"
+    - "> /dev/sda"
+    - "chmod 777"
+    - ":(){:|:&};:"
+  review_patterns:
+    - "rm "
+    - "pip install"
+    - "git push"
+    - "git reset --hard"
+    - "docker"
+    - "kill"
+    - "shutdown"
+  allowed_write_paths:
+    - "."  # project directory only
+
+agent:
+  max_iterations: 15          # max ReAct loop iterations per agent
+  bash_timeout: 30            # seconds
+  parallel_audit: true        # run audit agents in parallel

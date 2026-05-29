@@ -1,0 +1,10 @@
+services:
+  argus:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./argus.yaml:/app/argus.yaml:ro
+      - ${PROJECT_PATH:-.}:/project
+    stdin_open: true
+    tty: true
