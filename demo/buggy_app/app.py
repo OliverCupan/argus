@@ -72,5 +72,11 @@ def health():
     return jsonify({"status": "ok"})
 
 
+@app.route("/hello")
+def hello():
+    """Simple hello world endpoint."""
+    return jsonify({"message": "Hello, World!"})
+
+
 if __name__ == "__main__":
     app.run(debug=True)

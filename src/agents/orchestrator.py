@@ -59,6 +59,9 @@ class Orchestrator:
             pass
         self._status = status_callback or _noop
 
+        # Persists between requests so `fix <id>` can reference the last audit
+        self._last_findings: list[dict] = []
+
         self.explorer = Explorer(config, self.llm, self.tracker, self.tools)
         self.challenger = Challenger(config, self.llm, self.tracker, self.tools)
         self.coder = Coder(config, self.llm, self.tracker, self.tools)
@@ -95,6 +98,11 @@ class Orchestrator:
     # ------------------------------------------------------------------ #
 
     async def _run_audit(self, target_path: str) -> str:
+        import os
+        resolved = os.path.realpath(target_path)
+        if not os.path.exists(resolved):
+            return f"**Audit failed:** path `{target_path}` does not exist."
+
         await self._status(f"Explorer mapping {target_path}…")
         explorer_result = await self.explorer.run(
             f"Map the codebase at '{target_path}'. "
@@ -103,17 +111,35 @@ class Orchestrator:
         )
         logger.debug("Explorer done: %d tokens", explorer_result.total_input_tokens + explorer_result.total_output_tokens)
 
+        # Guard: if explorer found nothing meaningful, bail early
+        if explorer_result.content.startswith("["):
+            return f"**Audit of `{target_path}`:** Explorer could not map the project — {explorer_result.content}"
+
         await self._status("Running 4 auditors in parallel…")
 
         audit_task = f"Audit the code at '{target_path}'. Context from Explorer:\n\n{explorer_result.content}"
 
         if self.config.agent.parallel_audit:
-            audit_results: list[AgentResult] = list(await asyncio.gather(
+            raw_results = await asyncio.gather(
                 self.auditors[0].run(audit_task),  # security
                 self.auditors[1].run(audit_task),  # bugs
                 self.auditors[2].run(audit_task),  # performance
                 self.auditors[3].run(audit_task),  # tests
-            ))
+                return_exceptions=True,
+            )
+            # Filter out exceptions — log them but don't crash the whole audit
+            audit_results: list[AgentResult] = []
+            for i, r in enumerate(raw_results):
+                if isinstance(r, Exception):
+                    logger.error("Auditor %d failed: %s", i, r)
+                    # Insert a placeholder result so the report notes the failure
+                    audit_results.append(AgentResult(
+                        content=f"FINDING: Auditor failed\nSEVERITY: LOW\nDESCRIPTION: {r}\nSUGGESTION: Check logs.",
+                        agent_name=self.auditors[i].name,
+                        iterations=0,
+                    ))
+                else:
+                    audit_results.append(r)
         else:
             audit_results = []
             for auditor in self.auditors:
@@ -121,7 +147,8 @@ class Orchestrator:
                 audit_results.append(await auditor.run(audit_task))
 
         await self._status("Synthesising findings…")
-        return self._format_audit_report(audit_results, target_path)
+        report = self._format_audit_report(audit_results, target_path)
+        return report
 
     # ------------------------------------------------------------------ #
     #  Coding pipeline                                                      #
@@ -170,6 +197,35 @@ class Orchestrator:
     #  Report formatting                                                    #
     # ------------------------------------------------------------------ #
 
+    async def fix_finding(self, finding_id: int) -> str:
+        """
+        Fix a specific finding by its number from the last audit report.
+        finding_id is 1-based (as shown in the report).
+        """
+        if not self._last_findings:
+            return "No audit findings in memory. Run `audit <path>` first."
+
+        idx = finding_id - 1
+        if idx < 0 or idx >= len(self._last_findings):
+            return (
+                f"Finding #{finding_id} does not exist. "
+                f"Last audit had {len(self._last_findings)} finding(s)."
+            )
+
+        f = self._last_findings[idx]
+        task = (
+            f"Fix this issue found by the {f['source']} auditor:\n\n"
+            f"**{f['title']}** [{f['severity']}]\n"
+            f"File: {f.get('file', 'unknown')}"
+            + (f":{f['line']}" if f.get("line") else "")
+            + f"\n\nDescription: {f.get('description', '')}\n"
+            f"Suggested fix: {f.get('suggestion', '')}"
+        )
+
+        await self._status(f"Fixing finding #{finding_id}: {f['title']}…")
+        result = await self.coder.run(task)
+        return result.content
+
     def _format_audit_report(
         self, results: list[AgentResult], target_path: str
     ) -> str:
@@ -180,6 +236,9 @@ class Orchestrator:
         findings = []
         for result in results:
             findings.extend(_parse_findings(result.content, result.agent_name))
+
+        # Save for `fix <id>` command
+        self._last_findings = findings
 
         if not findings:
             return f"**Audit of `{target_path}` — No issues found.**\n\nAll auditors returned clean."

@@ -3,12 +3,15 @@ CLI interface for Argus.
 
 Phase 1: single Coder agent  — free-form tasks
 Phase 2: Orchestrator routes  — 'audit <path>' or free-form coding tasks
+Phase 4: fix <finding_id>, colored severity output, polished UI
 """
 
 import asyncio
 import itertools
 import os
+import re
 import sys
+from typing import Coroutine, Any
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -23,6 +26,13 @@ console = Console()
 
 _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 _SPINNER_WIDTH = 80  # characters to pad/clear per line
+
+_SEV_STYLES = {
+    "CRITICAL": "bold red",
+    "HIGH":     "bold yellow",
+    "MEDIUM":   "bold cyan",
+    "LOW":      "dim",
+}
 
 
 class ArgusCliApp:
@@ -69,6 +79,42 @@ class ArgusCliApp:
         finally:
             await self.orchestrator.close()
 
+    async def _run_agent(self, coro: Coroutine[Any, Any, str]) -> str | None:
+        """
+        Run an agent coroutine with an inline spinner.
+        Returns the result string, or None if interrupted.
+        """
+        self._current_status = "Starting…"
+
+        async def _spinner_task() -> None:
+            frames = itertools.cycle(_SPINNER_FRAMES)
+            while True:
+                if not self._spinner_paused:
+                    frame = next(frames)
+                    line = f"\r  {frame}  {self._current_status}"
+                    sys.stdout.write(line.ljust(_SPINNER_WIDTH))
+                    sys.stdout.flush()
+                await asyncio.sleep(0.12)
+
+        orig_status = self.orchestrator._status
+
+        async def live_status(message: str) -> None:
+            self._current_status = message
+
+        self.orchestrator._status = live_status
+        spinner = asyncio.create_task(_spinner_task())
+        try:
+            result = await coro
+            return result
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Interrupted.[/yellow]")
+            return None
+        finally:
+            spinner.cancel()
+            self.orchestrator._status = orig_status
+            sys.stdout.write("\r" + " " * _SPINNER_WIDTH + "\r")
+            sys.stdout.flush()
+
     async def _input_loop(self):
         while True:
             try:
@@ -86,67 +132,48 @@ class ArgusCliApp:
                 self._print_stats()
                 continue
 
-            # Inject cwd for relative path awareness (passed to orchestrator,
-            # which injects it into the first user message via Coder)
+            # fix <id> — apply a fix for a specific finding from the last audit
+            fix_match = re.match(r"^fix\s+(\d+)\s*$", user_input, re.IGNORECASE)
+            if fix_match:
+                finding_id = int(fix_match.group(1))
+                result_text = await self._run_agent(
+                    self.orchestrator.fix_finding(finding_id)
+                )
+                if result_text:
+                    self._print_response(result_text)
+                    self._print_token_line()
+                continue
+
+            # Inject cwd for relative path awareness
             cwd = os.getcwd()
             augmented = f"[Working directory: {cwd}]\n\n{user_input}"
 
-            # Run the orchestrator with an inline spinner.
-            # Uses \r to overwrite one line — works in all terminals including Git Bash.
-            result_text = ""
-            self._current_status = "Starting…"
-
-            async def _spinner_task() -> None:
-                frames = itertools.cycle(_SPINNER_FRAMES)
-                while True:
-                    if not self._spinner_paused:
-                        frame = next(frames)
-                        line = f"\r  {frame}  {self._current_status}"
-                        sys.stdout.write(line.ljust(_SPINNER_WIDTH))
-                        sys.stdout.flush()
-                    await asyncio.sleep(0.12)
-
-            orig_status = self.orchestrator._status
-
-            async def live_status(message: str) -> None:
-                self._current_status = message
-
-            self.orchestrator._status = live_status
-            spinner = asyncio.create_task(_spinner_task())
-            try:
-                result_text = await self.orchestrator.handle(augmented)
-            except KeyboardInterrupt:
-                console.print("\n[yellow]Interrupted.[/yellow]")
+            result_text = await self._run_agent(self.orchestrator.handle(augmented))
+            if result_text is None:
                 continue
-            finally:
-                spinner.cancel()
-                self.orchestrator._status = orig_status
-                # Clear the spinner line before printing the response
-                sys.stdout.write("\r" + " " * _SPINNER_WIDTH + "\r")
-                sys.stdout.flush()
 
             self._print_response(result_text)
+            self._print_token_line()
 
-            # Brief per-request token summary
-            summary = self.token_tracker.get_summary()
+    def _print_token_line(self):
+        summary = self.token_tracker.get_summary()
+        console.print(
+            f"[dim]  {summary['total_tokens']:,} tokens · "
+            f"${summary['total_cost_usd']:.4f} · "
+            f"{summary['percent_used']}% of budget[/dim]"
+        )
+        if summary["warnings"]:
             console.print(
-                f"[dim]  Total session: {summary['total_tokens']:,} tokens · "
-                f"${summary['total_cost_usd']:.4f} · "
-                f"{summary['percent_used']}% of budget[/dim]"
+                f"[yellow bold]  Warning:[/yellow bold] [yellow]"
+                f"Token budget at {summary['percent_used']}% "
+                f"({summary['total_tokens']:,} / {summary['hard_cap']:,})[/yellow]"
             )
-
-            # Surface budget warnings
-            if summary["warnings"]:
-                console.print(
-                    f"[yellow bold]Warning:[/yellow bold] [yellow]"
-                    f"Token budget at {summary['percent_used']}% "
-                    f"({summary['total_tokens']:,} / {summary['hard_cap']:,})[/yellow]"
-                )
 
     def _print_banner(self):
         console.print(Panel(
             "[bold cyan]Argus[/bold cyan] — Multi-Agent Coding Assistant\n"
-            "[dim]Commands: free-form tasks · 'audit <path>' · 'stats' · 'exit'[/dim]",
+            "[dim]Commands: free-form tasks · "
+            "'audit <path>' · 'fix <id>' · 'stats' · 'exit'[/dim]",
             border_style="cyan",
             padding=(0, 2),
         ))
@@ -184,6 +211,33 @@ class ArgusCliApp:
         )
 
     def _print_response(self, response: str):
-        """Display agent response as formatted markdown."""
-        if response:
-            console.print(Markdown(response))
+        """Display agent response as formatted markdown.
+        Budget/API error messages are shown as warnings.
+        Audit reports get an extra colored severity summary bar on top.
+        """
+        if not response:
+            return
+        # Agent-level error / budget messages (start with '[')
+        if response.lstrip().startswith("["):
+            console.print(f"[yellow]  {response.strip()}[/yellow]")
+            return
+        if "## Audit Report" in response or "Finding #" in response:
+            self._print_severity_bar(response)
+        console.print(Markdown(response))
+
+    def _print_severity_bar(self, report: str):
+        """Print a one-line colored severity count bar above an audit report."""
+        counts: dict[str, int] = {}
+        for sev in _SEV_STYLES:
+            m = re.search(rf"(\d+)\s+{sev}", report)
+            if m:
+                counts[sev] = int(m.group(1))
+        if not counts:
+            return
+        parts = []
+        for sev, style in _SEV_STYLES.items():
+            n = counts.get(sev, 0)
+            if n > 0:
+                parts.append(f"[{style}]  {n} {sev}  [/{style}]")
+        if parts:
+            console.print("".join(parts))

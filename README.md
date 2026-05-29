@@ -2,48 +2,202 @@
 
 **Multi-agent coding assistant with self-auditing superpowers.**
 
-Argus is a terminal-based AI coding assistant that doesn't just write code — it hunts bugs in its own output before you see it. Parallel specialist agents (Security, Bugs, Performance, Tests) audit every change, while a Challenger agent pokes holes in the plan before a single line is written.
+Argus is a terminal-based AI coding assistant that doesn't just write code — it hunts bugs in its own output before you see the result. Parallel specialist agents (Security, Bugs, Performance, Tests) audit every change automatically, while a Challenger agent pokes holes in the plan before a single line is written.
+
+---
+
+## Architecture
+
+```
+User Input
+    │
+    ▼
+┌───────────────┐
+│  Orchestrator │  routes intent, synthesises results
+└───────┬───────┘
+        │
+        ├── Coding task ──────────────────────────────────────────────────┐
+        │                                                                  │
+        │   ┌──────────┐   ┌────────────┐   ┌──────────┐                 │
+        │   │ Explorer │ → │ Challenger │ → │  Coder   │                 │
+        │   │ maps code│   │ pokes holes│   │ edits/   │                 │
+        │   └──────────┘   └────────────┘   │ verifies │                 │
+        │                                   └──────────┘                 │
+        │                                        │                        │
+        │                   Auto-Audit ──────────┘                        │
+        │                                                                  │
+        └── audit <path> ──────────────────────────────────────────────── ┘
+                │
+                │   (parallel)
+                ├── SecurityAuditor  — injection, secrets, auth
+                ├── BugAuditor       — logic errors, null refs, type mismatches
+                ├── PerformanceAuditor — O(n²), N+1 queries, blocking I/O
+                └── TestAuditor      — run pytest, spot untested paths
+```
+
+### Agent roles
+
+| Agent | Model | Role |
+|---|---|---|
+| Orchestrator | Haiku 4.5 | Routes intent, coordinates pipeline |
+| Explorer | Haiku 3.5 | Maps codebase, reads relevant files |
+| Challenger | Haiku 4.5 | Critiques the plan before coding starts |
+| Coder | Haiku 4.5 | Makes surgical edits, verifies with tests |
+| SecurityAuditor | Haiku 4.5 | Finds injection, secrets, auth issues |
+| BugAuditor | Haiku 4.5 | Finds logic errors, null refs, type mismatches |
+| PerformanceAuditor | Haiku 3.5 | Finds O(n²), N+1 queries, blocking I/O |
+| TestAuditor | Haiku 3.5 | Runs pytest, spots untested paths |
+
+---
 
 ## Quick Start
 
+### Run directly
+
 ```bash
-# Clone and configure
+# 1. Clone
+git clone https://github.com/OliverCupan/argus.git
+cd argus
+
+# 2. Configure
 cp .env.example .env
-# Add your ANTHROPIC_API_KEY to .env
+# Edit .env and set ANTHROPIC_API_KEY=sk-ant-...
 
-# Run with Docker
-docker compose up
-
-# Or run directly
+# 3. Install
 pip install -r requirements.txt
+
+# 4. Run
 python main.py
 ```
+
+### Run with Docker
+
+```bash
+# Point at any project directory and go
+cp .env.example .env
+# Add ANTHROPIC_API_KEY to .env
+
+PROJECT_PATH=/path/to/your/project docker compose up
+```
+
+---
 
 ## Usage
 
 ```
 argus > fix the login endpoint to validate email format
+argus > add rate limiting to the /api/search endpoint
 argus > audit src/
+argus > audit demo/buggy_app
+argus > fix 3
 argus > stats
 argus > exit
 ```
 
-## Architecture
+### Commands
 
-```
-User Input → Orchestrator
-               ├── Coding Mode: Explorer → Challenger → Coder → Auto-Audit
-               └── Audit Mode:  Explorer → [Security | Bugs | Perf | Tests] → Report
-```
+| Command | Description |
+|---|---|
+| `<free-form text>` | Coding task: Explorer → Challenger → Coder → Auto-Audit |
+| `audit <path>` | Audit a directory: parallel Security/Bug/Perf/Test scan |
+| `fix <id>` | Fix a specific finding from the last audit (e.g. `fix 3`) |
+| `stats` | Show per-agent token usage and USD cost |
+| `exit` | Quit |
+
+### Safety
+
+Bash commands are classified before execution:
+
+- **BLOCKED** — `rm -rf /`, `sudo`, `mkfs`, etc. → rejected automatically
+- **REVIEW** — `rm`, `pip install`, `git push`, `docker`, etc. → requires your `y/N` confirmation
+- **SAFE** — `ls`, `cat`, `grep`, `pytest`, etc. → runs immediately
+
+---
 
 ## Configuration
 
-All settings in `argus.yaml`. API keys in `.env`.
+All settings live in `argus.yaml` — no hardcoded values in source.
+
+```yaml
+models:
+  orchestrator: claude-haiku-4-5-20251001
+  coder: claude-haiku-4-5-20251001
+  # ...
+
+token_budget:
+  total_hard_cap: 500000      # hard stop at this many tokens
+  warning_threshold: 0.8      # warn at 80%
+  per_agent:
+    coder: 150000
+
+safety:
+  blocked_commands: ["rm -rf /", "sudo", ...]
+  review_patterns: ["pip install", "git push", ...]
+  allowed_write_paths: ["."]  # agents can only write inside project dir
+```
+
+---
 
 ## Demo
 
+The `demo/buggy_app/` directory contains a small Flask app with 5 planted bugs:
+
+1. Hardcoded API key in source
+2. SQL injection vulnerability
+3. O(n²) nested loop
+4. Unhandled `None` / missing key
+5. Failing test
+
 ```bash
-# Run Argus against the demo buggy app
 python main.py
 argus > audit demo/buggy_app
+```
+
+Argus should find all 5 issues, rank them by severity (CRITICAL → LOW), and let you fix them one by one with `fix <id>`.
+
+---
+
+## Development
+
+```bash
+# Debug logging
+ARGUS_LOG_LEVEL=DEBUG python main.py
+
+# Run tests
+pytest
+
+# Lint
+ruff check src/
+```
+
+## Project Structure
+
+```
+argus/
+├── main.py                 # Entry point
+├── argus.yaml              # All configuration
+├── .env.example            # API key template
+├── Dockerfile
+├── docker-compose.yml
+├── src/
+│   ├── cli.py              # Terminal UI
+│   ├── config.py           # YAML + env loader
+│   └── core/
+│       ├── llm_client.py   # Anthropic API wrapper
+│       ├── agent_loop.py   # ReAct base loop
+│       ├── token_tracker.py
+│       ├── context_manager.py
+│       └── safety.py
+│   └── agents/
+│       ├── orchestrator.py
+│       ├── explorer.py
+│       ├── challenger.py
+│       ├── coder.py
+│       └── auditors/
+│           ├── security.py
+│           ├── bugs.py
+│           ├── performance.py
+│           └── tests.py
+└── demo/
+    └── buggy_app/
 ```
