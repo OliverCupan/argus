@@ -5,21 +5,24 @@ Phase 1: single Coder agent  — free-form tasks
 Phase 2: Orchestrator routes  — 'audit <path>' or free-form coding tasks
 """
 
+import asyncio
+import itertools
 import os
+import sys
 
 from rich.console import Console
-from rich.live import Live
-from rich.panel import Panel
 from rich.markdown import Markdown
-from rich.spinner import Spinner
+from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
 from src.config import ArgusConfig
 from src.core.token_tracker import TokenTracker
 from src.agents.orchestrator import Orchestrator
 
-console = Console(force_terminal=True)
+console = Console()
+
+_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+_SPINNER_WIDTH = 80  # characters to pad/clear per line
 
 
 class ArgusCliApp:
@@ -27,21 +30,27 @@ class ArgusCliApp:
         self.config = config
         self.token_tracker = TokenTracker(config.token_budget)
         self._current_status = "Working…"
+        self._spinner_paused = False
 
-        # REVIEW confirmation callback
-        # console.print() works fine inside a Live context (Rich interleaves it).
-        # Only console.input() conflicts with Live, so we use Python's built-in
-        # input() which reads stdin directly without touching the Live renderer.
+        def _clear_spinner_line() -> None:
+            sys.stdout.write("\r" + " " * _SPINNER_WIDTH + "\r")
+            sys.stdout.flush()
+
+        # REVIEW confirmation callback — pauses the spinner, prompts, resumes.
         async def confirm_callback(command: str) -> bool:
+            self._spinner_paused = True
+            await asyncio.sleep(0.15)   # let spinner task see the pause flag
+            _clear_spinner_line()
             console.print(
                 f"\n[yellow bold]  REVIEW REQUIRED[/yellow bold]\n"
                 f"  The agent wants to run:\n"
                 f"  [bold]{command}[/bold]"
             )
             answer = input("  Allow? [y/N] ").strip().lower()
+            console.print()
+            self._spinner_paused = False
             return answer in ("y", "yes")
 
-        # Status callback — updates the live spinner message
         async def status_callback(message: str) -> None:
             self._current_status = message
 
@@ -82,26 +91,39 @@ class ArgusCliApp:
             cwd = os.getcwd()
             augmented = f"[Working directory: {cwd}]\n\n{user_input}"
 
-            # Show live spinner while agents work
+            # Run the orchestrator with an inline spinner.
+            # Uses \r to overwrite one line — works in all terminals including Git Bash.
             result_text = ""
             self._current_status = "Starting…"
 
+            async def _spinner_task() -> None:
+                frames = itertools.cycle(_SPINNER_FRAMES)
+                while True:
+                    if not self._spinner_paused:
+                        frame = next(frames)
+                        line = f"\r  {frame}  {self._current_status}"
+                        sys.stdout.write(line.ljust(_SPINNER_WIDTH))
+                        sys.stdout.flush()
+                    await asyncio.sleep(0.12)
+
+            orig_status = self.orchestrator._status
+
+            async def live_status(message: str) -> None:
+                self._current_status = message
+
+            self.orchestrator._status = live_status
+            spinner = asyncio.create_task(_spinner_task())
             try:
-                with Live(self._make_status_panel(), console=console, refresh_per_second=4) as live:
-                    orig_status = self.orchestrator._status
-
-                    async def live_status(message: str) -> None:
-                        self._current_status = message
-                        live.update(self._make_status_panel())
-
-                    self.orchestrator._status = live_status
-                    try:
-                        result_text = await self.orchestrator.handle(augmented)
-                    finally:
-                        self.orchestrator._status = orig_status
+                result_text = await self.orchestrator.handle(augmented)
             except KeyboardInterrupt:
                 console.print("\n[yellow]Interrupted.[/yellow]")
                 continue
+            finally:
+                spinner.cancel()
+                self.orchestrator._status = orig_status
+                # Clear the spinner line before printing the response
+                sys.stdout.write("\r" + " " * _SPINNER_WIDTH + "\r")
+                sys.stdout.flush()
 
             self._print_response(result_text)
 
@@ -120,10 +142,6 @@ class ArgusCliApp:
                     f"Token budget at {summary['percent_used']}% "
                     f"({summary['total_tokens']:,} / {summary['hard_cap']:,})[/yellow]"
                 )
-
-    def _make_status_panel(self) -> Panel:
-        spinner = Spinner("dots", text=Text(f" {self._current_status}", style="green"))
-        return Panel(spinner, border_style="dim", padding=(0, 1))
 
     def _print_banner(self):
         console.print(Panel(
