@@ -1,14 +1,14 @@
 # Argus Configuration
 
 models:
-  orchestrator: claude-sonnet-4-20250514
-  challenger: claude-sonnet-4-20250514
-  coder: claude-sonnet-4-20250514
-  explorer: claude-haiku-4-5-20251001
-  security_auditor: claude-sonnet-4-20250514
-  bug_auditor: claude-sonnet-4-20250514
-  performance_auditor: claude-haiku-4-5-20251001
-  test_auditor: claude-haiku-4-5-20251001
+  orchestrator: claude-haiku-4-5-20251001
+  challenger: claude-haiku-4-5-20251001
+  coder: claude-haiku-4-5-20251001
+  explorer: claude-3-5-haiku-20241022
+  security_auditor: claude-haiku-4-5-20251001
+  bug_auditor: claude-haiku-4-5-20251001
+  performance_auditor: claude-3-5-haiku-20241022
+  test_auditor: claude-3-5-haiku-20241022
 
 api:
   provider: anthropic  # anthropic | openai
@@ -32,7 +32,7 @@ token_budget:
 context:
   max_history_tokens: 50000
   compaction_threshold: 3000    # compact tool outputs above this token count
-  compaction_model: claude-haiku-4-5-20251001
+  compaction_model: claude-3-5-haiku-20241022
 
 safety:
   blocked_commands:
