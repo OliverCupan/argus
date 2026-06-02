@@ -1,7 +1,7 @@
 """
 Argus — Multi-Agent Coding Assistant
 
-Entry point. Loads config, starts the CLI.
+Entry point. Loads config, fetches live model pricing, starts the CLI.
 Set ARGUS_LOG_LEVEL=DEBUG for verbose logging.
 """
 
@@ -17,12 +17,12 @@ from rich.console import Console
 
 from src.config import load_config
 from src.cli import ArgusCliApp
+from src.core.pricing import ModelPricing
 
 console = Console()
 
 
-def main():
-    # Configure logging from env var (default: WARNING = quiet)
+async def _start():
     log_level = os.getenv("ARGUS_LOG_LEVEL", "WARNING").upper()
     logging.basicConfig(
         level=getattr(logging, log_level, logging.WARNING),
@@ -46,8 +46,17 @@ def main():
         console.print(f"[red]Invalid argus.yaml:[/red] {e}")
         sys.exit(1)
 
-    app = ArgusCliApp(config)
-    asyncio.run(app.run())
+    # Fetch live model pricing at startup
+    pricing = ModelPricing()
+    source = await pricing.fetch_prices()
+    logging.getLogger(__name__).info("Pricing source: %s", source)
+
+    app = ArgusCliApp(config, pricing=pricing)
+    await app.run()
+
+
+def main():
+    asyncio.run(_start())
 
 
 if __name__ == "__main__":

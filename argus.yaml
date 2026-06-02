@@ -17,8 +17,11 @@ api:
   timeout: 60
 
 token_budget:
-  total_hard_cap: 500000
-  warning_threshold: 0.8  # warn at 80% of budget
+  total_hard_cap: 500000     # tokens — kill agent immediately
+  total_soft_cap: 400000     # tokens — warn, let agent wind down gracefully
+  dollar_hard_cap: 5.00      # USD — kill immediately (set 0 to disable)
+  dollar_soft_cap: 4.00      # USD — warn (set 0 to disable)
+  warning_threshold: 0.8     # legacy 80% warning threshold
   per_agent:
     orchestrator: 100000
     challenger: 50000
@@ -31,8 +34,9 @@ token_budget:
 
 context:
   max_history_tokens: 50000
-  compaction_threshold: 3000    # compact tool outputs above this token count
+  compaction_threshold: 1000        # Tier 1/2 boundary — outputs below this pass through
   compaction_model: claude-3-5-haiku-20241022
+  max_context_injection_pct: 0.30   # max 30% of history budget for injected context
 
 safety:
   blocked_commands:
@@ -58,3 +62,5 @@ agent:
   max_iterations: 15          # max ReAct loop iterations per agent
   bash_timeout: 30            # seconds
   parallel_audit: true        # run audit agents in parallel
+  use_worktrees: false        # opt-in git worktree isolation for Coder
+  worktree_dir: .argus/worktrees

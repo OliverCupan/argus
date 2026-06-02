@@ -26,8 +26,11 @@ class ModelConfig:
 
 @dataclass
 class TokenBudget:
-    total_hard_cap: int = 500000
-    warning_threshold: float = 0.8
+    total_hard_cap: int = 500_000      # tokens — kill immediately
+    total_soft_cap: int = 400_000      # tokens — warn, let agent wind down
+    dollar_hard_cap: float = 5.00      # USD — kill immediately (0 = disabled)
+    dollar_soft_cap: float = 4.00      # USD — warn (0 = disabled)
+    warning_threshold: float = 0.8    # legacy threshold (kept for compat)
     per_agent: dict = field(default_factory=dict)
 
 
@@ -41,8 +44,9 @@ class SafetyConfig:
 @dataclass
 class ContextConfig:
     max_history_tokens: int = 50000
-    compaction_threshold: int = 3000
-    compaction_model: str = "claude-haiku-4-5-20251001"
+    compaction_threshold: int = 1000          # Tier 1/2 boundary (Step 7)
+    compaction_model: str = "claude-3-5-haiku-20241022"
+    max_context_injection_pct: float = 0.30   # max % of history for injected context
 
 
 @dataclass
@@ -50,6 +54,8 @@ class AgentConfig:
     max_iterations: int = 15
     bash_timeout: int = 30
     parallel_audit: bool = True
+    use_worktrees: bool = False               # opt-in git worktree isolation
+    worktree_dir: str = ".argus/worktrees"
 
 
 @dataclass
@@ -94,7 +100,10 @@ def load_config(path: Path) -> ArgusConfig:
     # Token budget
     budget = raw.get("token_budget", {})
     config.token_budget = TokenBudget(
-        total_hard_cap=budget.get("total_hard_cap", 500000),
+        total_hard_cap=budget.get("total_hard_cap", 500_000),
+        total_soft_cap=budget.get("total_soft_cap", 400_000),
+        dollar_hard_cap=float(budget.get("dollar_hard_cap", 5.00)),
+        dollar_soft_cap=float(budget.get("dollar_soft_cap", 4.00)),
         warning_threshold=budget.get("warning_threshold", 0.8),
         per_agent=budget.get("per_agent", {}),
     )
@@ -111,8 +120,9 @@ def load_config(path: Path) -> ArgusConfig:
     ctx = raw.get("context", {})
     config.context = ContextConfig(
         max_history_tokens=ctx.get("max_history_tokens", 50000),
-        compaction_threshold=ctx.get("compaction_threshold", 3000),
-        compaction_model=ctx.get("compaction_model", "claude-haiku-4-5-20251001"),
+        compaction_threshold=ctx.get("compaction_threshold", 1000),
+        compaction_model=ctx.get("compaction_model", "claude-3-5-haiku-20241022"),
+        max_context_injection_pct=float(ctx.get("max_context_injection_pct", 0.30)),
     )
 
     # Agent
@@ -121,6 +131,8 @@ def load_config(path: Path) -> ArgusConfig:
         max_iterations=agent.get("max_iterations", 15),
         bash_timeout=agent.get("bash_timeout", 30),
         parallel_audit=agent.get("parallel_audit", True),
+        use_worktrees=agent.get("use_worktrees", False),
+        worktree_dir=agent.get("worktree_dir", ".argus/worktrees"),
     )
 
     # API keys from environment

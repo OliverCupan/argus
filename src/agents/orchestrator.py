@@ -20,6 +20,7 @@ from src.config import ArgusConfig
 from src.core.llm_client import LLMClient
 from src.core.token_tracker import TokenTracker
 from src.core.agent_loop import AgentResult
+from src.core.worktree import WorktreeManager
 from src.tools.registry import ToolRegistry, build_registry
 
 from src.agents.explorer import Explorer
@@ -61,6 +62,7 @@ class Orchestrator:
 
         # Persists between requests so `fix <id>` can reference the last audit
         self._last_findings: list[dict] = []
+        self._worktrees = WorktreeManager(config.agent)
 
         self.explorer = Explorer(config, self.llm, self.tracker, self.tools)
         self.challenger = Challenger(config, self.llm, self.tracker, self.tools)
@@ -74,6 +76,15 @@ class Orchestrator:
 
     async def close(self):
         await self.llm.close()
+        await self._worktrees.cleanup_all()
+
+    def set_model(self, agent_name: str, model: str) -> bool:
+        """Update an agent's model at runtime. Returns True on success."""
+        if not hasattr(self.config.models, agent_name):
+            return False
+        setattr(self.config.models, agent_name, model)
+        logger.info("Model updated: %s → %s", agent_name, model)
+        return True
 
     async def handle(self, user_input: str) -> str:
         """
@@ -115,31 +126,34 @@ class Orchestrator:
         if explorer_result.content.startswith("["):
             return f"**Audit of `{target_path}`:** Explorer could not map the project — {explorer_result.content}"
 
-        await self._status("Running 4 auditors in parallel…")
+        n_auditors = len(self.auditors)
+        await self._status(f"Running {n_auditors} auditors in parallel…")
 
         audit_task = f"Audit the code at '{target_path}'. Context from Explorer:\n\n{explorer_result.content}"
 
         if self.config.agent.parallel_audit:
-            raw_results = await asyncio.gather(
-                self.auditors[0].run(audit_task),  # security
-                self.auditors[1].run(audit_task),  # bugs
-                self.auditors[2].run(audit_task),  # performance
-                self.auditors[3].run(audit_task),  # tests
-                return_exceptions=True,
-            )
-            # Filter out exceptions — log them but don't crash the whole audit
+            # Use asyncio.as_completed so status updates stream as each auditor finishes
+            auditor_tasks = {
+                asyncio.create_task(a.run(audit_task)): a
+                for a in self.auditors
+            }
             audit_results: list[AgentResult] = []
-            for i, r in enumerate(raw_results):
-                if isinstance(r, Exception):
-                    logger.error("Auditor %d failed: %s", i, r)
-                    # Insert a placeholder result so the report notes the failure
+            done_count = 0
+            for coro in asyncio.as_completed(list(auditor_tasks.keys())):
+                try:
+                    result = await coro
+                    audit_results.append(result)
+                except Exception as e:
+                    # Find which auditor this was (best effort)
+                    failed_name = "unknown"
+                    logger.error("Auditor failed: %s", e)
                     audit_results.append(AgentResult(
-                        content=f"FINDING: Auditor failed\nSEVERITY: LOW\nDESCRIPTION: {r}\nSUGGESTION: Check logs.",
-                        agent_name=self.auditors[i].name,
+                        content=f"FINDING: Auditor failed\nSEVERITY: LOW\nDESCRIPTION: {e}\nSUGGESTION: Check logs.",
+                        agent_name=failed_name,
                         iterations=0,
                     ))
-                else:
-                    audit_results.append(r)
+                done_count += 1
+                await self._status(f"Auditors: {done_count}/{n_auditors} done…")
         else:
             audit_results = []
             for auditor in self.auditors:
@@ -155,20 +169,56 @@ class Orchestrator:
     # ------------------------------------------------------------------ #
 
     async def _run_coding_task(self, task: str) -> str:
+        # Phase 1: Explorer maps the codebase (must run first — provides context)
         await self._status("Explorer mapping codebase…")
         explorer_result = await self.explorer.run(task)
 
-        await self._status("Challenger reviewing approach…")
-        challenger_result = await self.challenger.run(
-            task, context=explorer_result.content
+        # Phase 2: Challenger reviews + Coder pre-reads files in parallel
+        # Coder can start reading files while Challenger is thinking.
+        await self._status("Challenger reviewing approach + Coder pre-reading…")
+        challenger_task = asyncio.create_task(
+            self.challenger.run(task, context=explorer_result.content)
         )
+        coder_prep_task = asyncio.create_task(
+            self.coder.run(
+                f"Pre-read the files you will need for this task. "
+                f"DO NOT make any edits yet — just read and understand:\n{task}",
+                context=explorer_result.content,
+            )
+        )
+
+        # Challenger must finish before Coder executes (it provides the reviewed plan)
+        challenger_result = await challenger_task
+        # Coder prep: wait for it too (it may still be reading; no harm in waiting)
+        try:
+            await asyncio.wait_for(asyncio.shield(coder_prep_task), timeout=0.01)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass  # still running — Coder will get the context from Challenger anyway
+
+        # Phase 3: Coder implements using Challenger's reviewed plan
+        # Optionally isolated in a git worktree
+        coder_cwd = None
+        if self.config.agent.use_worktrees:
+            await self._status("Creating Coder worktree…")
+            coder_cwd = await self._worktrees.create("coder")
+            if coder_cwd:
+                logger.info("Coder running in worktree: %s", coder_cwd)
+            else:
+                logger.warning("Worktree creation failed — Coder will work on main tree")
 
         await self._status("Coder implementing…")
         coder_result = await self.coder.run(
             task, context=challenger_result.content
         )
 
-        # Auto-audit changed files
+        # Merge worktree changes back to main tree
+        if coder_cwd:
+            await self._status("Merging Coder worktree back…")
+            merge_summary = await self._worktrees.merge_back("coder")
+            await self._worktrees.cleanup("coder")
+            logger.info("Worktree merge: %s", merge_summary)
+
+        # Phase 4: Parallel auto-audit of changed files
         await self._status("Auto-auditing changes…")
         audit_report = await self._run_audit(".")
 

@@ -75,8 +75,13 @@ class BaseAgent:
         Returns:
             AgentResult with the final response and token stats
         """
-        # Build initial message
+        # Compact injected context if it exceeds the allowed budget fraction
         if context:
+            context = await self.context.compact_injected_context(
+                context, self.llm,
+                token_tracker=self.tracker,
+                agent_name=self.name,
+            )
             initial_content = f"Context:\n{context}\n\nTask: {task}"
         else:
             initial_content = task
@@ -92,18 +97,33 @@ class BaseAgent:
             self.name, model, self.get_tool_names()
         )
 
+        _winding_down = False       # set True on soft-cap hit; hard-stop after 2 more iters
+        _soft_iters_left = 2        # how many more iterations after soft cap
+
         for iteration in range(1, self.config.agent.max_iterations + 1):
 
             # --- Budget checks ---
             if self.tracker.is_hard_cap_reached():
-                logger.warning("[%s] Hard token cap reached", self.name)
+                logger.warning("[%s] Hard cap reached", self.name)
                 return AgentResult(
-                    content="[Token budget exceeded — agent stopped]",
+                    content="[Budget hard limit reached — agent stopped]",
                     agent_name=self.name,
                     iterations=iteration,
                     total_input_tokens=total_in,
                     total_output_tokens=total_out,
                 )
+
+            if _winding_down:
+                _soft_iters_left -= 1
+                if _soft_iters_left <= 0:
+                    logger.warning("[%s] Soft cap escalated to hard stop after wind-down", self.name)
+                    return AgentResult(
+                        content="[Budget soft limit exceeded — agent wound down]",
+                        agent_name=self.name,
+                        iterations=iteration,
+                        total_input_tokens=total_in,
+                        total_output_tokens=total_out,
+                    )
 
             if self.tracker.is_agent_cap_reached(self.name):
                 logger.warning("[%s] Per-agent token cap reached", self.name)
@@ -188,6 +208,19 @@ class BaseAgent:
 
             # All tool results for this turn go into ONE user message
             messages.append({"role": "user", "content": tool_results})
+
+            # Soft cap: inject wind-down notice after executing this iteration's tools
+            if not _winding_down and self.tracker.is_soft_cap_reached():
+                logger.warning("[%s] Soft cap reached — agent will wind down", self.name)
+                _winding_down = True
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "⚠️ Budget soft limit reached. "
+                        "Wrap up your current work and return your findings now. "
+                        "Do not start any new tasks or tool calls."
+                    ),
+                })
 
             # Trim history if approaching context limit
             messages = self.context.trim_history(messages)

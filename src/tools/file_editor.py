@@ -3,6 +3,7 @@ File Editor Tool — surgical file edits via search/replace.
 
 old_str must match exactly and appear exactly once in the file.
 Validates write path against safety policy before any disk write.
+Acquires an advisory write lock via FileLockManager before writing.
 """
 
 import logging
@@ -10,21 +11,21 @@ from pathlib import Path
 
 from src.tools.registry import Tool
 from src.core.safety import SafetyChecker
+from src.core.agent_coordinator import get_coordinator
 
 logger = logging.getLogger(__name__)
 
 
-def create_file_editor_tool(config=None) -> Tool:
+def create_file_editor_tool(config=None, agent_name: str = "coder") -> Tool:
     """Create and return the file editor tool."""
     safety = SafetyChecker(config.safety) if config else None
+    coordinator = get_coordinator()
 
     async def handler(path: str, old_str: str, new_str: str) -> str:
         """Replace old_str with new_str in the specified file."""
-        # Guard: empty old_str gives nonsensical count result
         if not old_str:
             return "Error: old_str cannot be empty"
 
-        # Safety: validate write path
         if safety and not safety.validate_file_path(path):
             return f"Error: Writing to '{path}' is blocked by safety policy"
 
@@ -52,12 +53,22 @@ def create_file_editor_tool(config=None) -> Tool:
 
         new_content = content.replace(old_str, new_str, 1)
 
+        # Acquire write lock with a short timeout
         try:
-            target.write_text(new_content, encoding="utf-8")
-        except PermissionError:
-            return f"Error: Permission denied writing: {path}"
-        except OSError as e:
-            return f"Error: Cannot write {path}: {e}"
+            async with coordinator.lock_manager.write_lock(path, agent=agent_name, timeout=20.0):
+                coordinator.log_access(agent_name, path, "write")
+                try:
+                    target.write_text(new_content, encoding="utf-8")
+                except PermissionError:
+                    return f"Error: Permission denied writing: {path}"
+                except OSError as e:
+                    return f"Error: Cannot write {path}: {e}"
+        except TimeoutError as e:
+            locked, owner = coordinator.lock_manager.is_write_locked(path)
+            return (
+                f"Error: Cannot write {path} — file is locked by agent '{owner}'. "
+                f"Try again shortly or work on a different file."
+            )
 
         logger.debug("edit_file: %s — replaced %d chars with %d chars", path, len(old_str), len(new_str))
         return (
