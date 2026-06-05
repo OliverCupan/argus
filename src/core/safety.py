@@ -5,6 +5,7 @@ Classifies bash commands as SAFE / REVIEW / BLOCKED.
 Validates file write paths against allowed directories.
 """
 
+import re
 from enum import Enum
 from pathlib import Path
 
@@ -33,14 +34,16 @@ class SafetyChecker:
         Returns:
             SafetyLevel enum value
         """
-        # Check blocked commands first (substring match)
+        # Check blocked commands first (word-boundary regex — prevents false
+        # positives where a blocked token like "rm" appears inside a safe word
+        # such as "chmod" or "form").
         for blocked in self.config.blocked_commands:
-            if blocked in command:
+            if re.search(r"\b" + re.escape(blocked), command):
                 return SafetyLevel.BLOCKED
 
         # Check review patterns
         for pattern in self.config.review_patterns:
-            if pattern in command:
+            if re.search(r"\b" + re.escape(pattern), command):
                 return SafetyLevel.REVIEW
 
         return SafetyLevel.SAFE

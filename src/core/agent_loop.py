@@ -8,7 +8,9 @@ Each subclass defines its own system prompt, model, and allowed tools.
 """
 
 import logging
+import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 
 import anthropic
 
@@ -17,6 +19,9 @@ from src.core.token_tracker import TokenTracker
 from src.core.context_manager import ContextManager
 from src.tools.registry import ToolRegistry
 from src.config import ArgusConfig
+
+if TYPE_CHECKING:
+    from src.gui.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,15 @@ class AgentResult:
     iterations: int
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+
+
+@dataclass
+class AgentDefinition:
+    name: str
+    system_prompt: str
+    model_key: str  # attribute name on config.models (e.g. "coder", "explorer")
+    max_tokens: int
+    tool_names: list
 
 
 class BaseAgent:
@@ -51,17 +65,33 @@ class BaseAgent:
         llm_client: LLMClient,
         token_tracker: TokenTracker,
         tool_registry: ToolRegistry,
+        event_bus: "Optional[EventBus]" = None,
     ):
         self.config = config
         self.llm = llm_client
         self.tracker = token_tracker
         self.tools = tool_registry
         self.context = ContextManager(config.context)
+        self._event_bus = event_bus
+
+    async def _emit(self, event_type: str, **data) -> None:
+        """Emit a GUI event if an event bus is wired in; no-op otherwise."""
+        if self._event_bus is not None:
+            await self._event_bus.emit(self.name, event_type, **data)
 
     def get_model(self) -> str:
+        if hasattr(self, "_defn"):
+            return getattr(self.config.models, self._defn.model_key)
         return self.config.models.orchestrator
 
+    def get_max_tokens(self) -> int:
+        if hasattr(self, "_defn"):
+            return self._defn.max_tokens
+        return 4096
+
     def get_tool_names(self) -> list[str]:
+        if hasattr(self, "_defn"):
+            return list(self._defn.tool_names)
         return []
 
     async def run(self, task: str, context: str = "") -> AgentResult:
@@ -91,49 +121,72 @@ class BaseAgent:
         model = self.get_model()
         total_in = 0
         total_out = 0
+        # Last substantive text the agent produced — returned on budget-cap paths
+        # so callers get partial work instead of a bare bracket error string.
+        last_content: str = ""
 
         logger.debug(
             "[%s] Starting run: model=%s, tools=%s",
             self.name, model, self.get_tool_names()
         )
+        await self._emit(
+            "agent_started",
+            task_preview=task[:120],
+            model=model,
+            tools=self.get_tool_names(),
+        )
 
         _winding_down = False       # set True on soft-cap hit; hard-stop after 2 more iters
         _soft_iters_left = 2        # how many more iterations after soft cap
 
-        for iteration in range(1, self.config.agent.max_iterations + 1):
+        _max_iters = self.config.agent.max_iterations_per_agent.get(
+            self.name, self.config.agent.max_iterations
+        )
+
+        def _partial_or_bracket(bracket_msg: str) -> str:
+            if last_content:
+                return last_content + f"\n\n[Note: {self.name} stopped early — {bracket_msg.strip('[]')}]"
+            return bracket_msg
+
+        async def _finish(content: str, tokens_in: int, tokens_out: int, iterations: int) -> AgentResult:
+            """Emit agent_finished + live token_update, then return AgentResult."""
+            await self._emit("agent_finished", content=content, tokens_in=tokens_in,
+                             tokens_out=tokens_out, iterations=iterations)
+            if self._event_bus is not None:
+                await self._event_bus.emit(self.name, "token_update",
+                                           summary=self.tracker.get_summary())
+            return AgentResult(
+                content=content,
+                agent_name=self.name,
+                iterations=iterations,
+                total_input_tokens=tokens_in,
+                total_output_tokens=tokens_out,
+            )
+
+        for iteration in range(1, _max_iters + 1):
+            await self._emit(
+                "agent_iteration",
+                iteration=iteration,
+                max_iterations=_max_iters,
+            )
 
             # --- Budget checks ---
             if self.tracker.is_hard_cap_reached():
                 logger.warning("[%s] Hard cap reached", self.name)
-                return AgentResult(
-                    content="[Budget hard limit reached — agent stopped]",
-                    agent_name=self.name,
-                    iterations=iteration,
-                    total_input_tokens=total_in,
-                    total_output_tokens=total_out,
-                )
+                _content = _partial_or_bracket("[Budget hard limit reached — agent stopped]")
+                return await _finish(_content, total_in, total_out, iteration)
 
             if _winding_down:
                 _soft_iters_left -= 1
                 if _soft_iters_left <= 0:
                     logger.warning("[%s] Soft cap escalated to hard stop after wind-down", self.name)
-                    return AgentResult(
-                        content="[Budget soft limit exceeded — agent wound down]",
-                        agent_name=self.name,
-                        iterations=iteration,
-                        total_input_tokens=total_in,
-                        total_output_tokens=total_out,
-                    )
+                    _content = _partial_or_bracket("[Budget soft limit exceeded — agent wound down]")
+                    return await _finish(_content, total_in, total_out, iteration)
 
             if self.tracker.is_agent_cap_reached(self.name):
                 logger.warning("[%s] Per-agent token cap reached", self.name)
-                return AgentResult(
-                    content=f"[Per-agent budget exceeded for {self.name}]",
-                    agent_name=self.name,
-                    iterations=iteration,
-                    total_input_tokens=total_in,
-                    total_output_tokens=total_out,
-                )
+                _content = _partial_or_bracket(f"[Per-agent budget exceeded for {self.name}]")
+                return await _finish(_content, total_in, total_out, iteration)
 
             # --- LLM call ---
             try:
@@ -142,6 +195,7 @@ class BaseAgent:
                     system=self.system_prompt,
                     messages=messages,
                     tools=tool_schemas if tool_schemas else None,
+                    max_tokens=self.get_max_tokens(),
                 )
             except anthropic.APIError as e:
                 logger.error("[%s] API error on iteration %d: %s", self.name, iteration, e)
@@ -164,18 +218,17 @@ class BaseAgent:
                 len(response.tool_calls), response.input_tokens, response.output_tokens
             )
 
+            # Track last substantive content for budget-cap fallback
+            if response.content:
+                last_content = response.content
+                await self._emit("agent_text", content=response.content)
+
             # --- End of turn: return final answer ---
             # Also catch max_tokens or any stop_reason with no tool calls
             if response.stop_reason == "end_turn" or not response.tool_calls:
                 content = response.content or "[No response]"
                 logger.debug("[%s] Finished in %d iterations", self.name, iteration)
-                return AgentResult(
-                    content=content,
-                    agent_name=self.name,
-                    iterations=iteration,
-                    total_input_tokens=total_in,
-                    total_output_tokens=total_out,
-                )
+                return await _finish(content, total_in, total_out, iteration)
 
             # --- Execute tool calls ---
             # Append assistant message ONCE with the raw content blocks
@@ -185,7 +238,22 @@ class BaseAgent:
             tool_results: list[dict] = []
             for tool_call in response.tool_calls:
                 logger.debug("[%s] Calling tool: %s", self.name, tool_call["name"])
+                input_preview = str(tool_call["input"])[:200]
+                await self._emit(
+                    "tool_call",
+                    tool_name=tool_call["name"],
+                    input_preview=input_preview,
+                )
+                _t0 = time.monotonic()
                 result = await self.tools.execute(tool_call["name"], tool_call["input"])
+                _duration_ms = int((time.monotonic() - _t0) * 1000)
+                await self._emit(
+                    "tool_result",
+                    tool_name=tool_call["name"],
+                    result_preview=result[:300],
+                    is_error=result.startswith(("Error:", "BLOCKED:", "DENIED:")),
+                    duration_ms=_duration_ms,
+                )
 
                 # Compact if too long
                 result = await self.context.maybe_compact(
@@ -206,31 +274,50 @@ class BaseAgent:
 
                 tool_results.append(tool_result_block)
 
-            # All tool results for this turn go into ONE user message
-            messages.append({"role": "user", "content": tool_results})
-
-            # Soft cap: inject wind-down notice after executing this iteration's tools
+            # Soft cap: append wind-down notice as a text block IN the same user message
+            # (cannot add a separate user message — Anthropic requires alternating turns)
             if not _winding_down and self.tracker.is_soft_cap_reached():
                 logger.warning("[%s] Soft cap reached — agent will wind down", self.name)
                 _winding_down = True
-                messages.append({
-                    "role": "user",
-                    "content": (
+                tool_results.append({
+                    "type": "text",
+                    "text": (
                         "⚠️ Budget soft limit reached. "
-                        "Wrap up your current work and return your findings now. "
+                        "Wrap up your current work immediately and return your final response.\n\n"
+                        "At the END of your response, include this exact block:\n"
+                        "HANDOFF:\n"
+                        "completed: <one sentence: what you finished>\n"
+                        "remaining: <one sentence: what you did not complete>\n"
+                        "context_for_next: <key facts a fresh agent needs to continue>\n\n"
                         "Do not start any new tasks or tool calls."
                     ),
                 })
+
+            # All tool results for this turn go into ONE user message
+            messages.append({"role": "user", "content": tool_results})
 
             # Trim history if approaching context limit
             messages = self.context.trim_history(messages)
 
         # Max iterations exhausted
-        logger.warning("[%s] Max iterations (%d) reached", self.name, self.config.agent.max_iterations)
-        return AgentResult(
-            content=f"[Max iterations ({self.config.agent.max_iterations}) reached — agent stopped]",
-            agent_name=self.name,
-            iterations=self.config.agent.max_iterations,
-            total_input_tokens=total_in,
-            total_output_tokens=total_out,
+        logger.warning("[%s] Max iterations (%d) reached", self.name, _max_iters)
+        _content = _partial_or_bracket(
+            f"[Max iterations ({_max_iters}) reached — agent stopped]"
         )
+        return await _finish(_content, total_in, total_out, _max_iters)
+
+
+def make_agent(
+    defn: AgentDefinition,
+    config,
+    llm_client: LLMClient,
+    token_tracker: TokenTracker,
+    tool_registry: ToolRegistry,
+    event_bus=None,
+) -> BaseAgent:
+    """Instantiate a BaseAgent from an AgentDefinition (no subclassing needed)."""
+    agent = BaseAgent(config, llm_client, token_tracker, tool_registry, event_bus=event_bus)
+    agent.name = defn.name
+    agent.system_prompt = defn.system_prompt
+    agent._defn = defn
+    return agent

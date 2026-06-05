@@ -93,7 +93,7 @@ class ToolRegistry:
             return f"Error executing {name}: {e}"
 
 
-def build_registry(config, confirm_callback=None) -> ToolRegistry:
+def build_registry(config, confirm_callback=None, llm=None, tracker=None, event_bus=None) -> ToolRegistry:
     """
     Create and populate the tool registry with all available tools.
 
@@ -101,6 +101,9 @@ def build_registry(config, confirm_callback=None) -> ToolRegistry:
         config: ArgusConfig instance
         confirm_callback: Optional async callable(command: str) -> bool
             Passed to bash_tool for REVIEW-level command approval.
+        llm: Optional LLMClient — required to register dispatch_agents.
+        tracker: Optional TokenTracker — required to register dispatch_agents.
+        event_bus: Optional EventBus forwarded to dispatched sub-agents.
     """
     from src.tools.bash_tool import create_bash_tool
     from src.tools.file_reader import create_file_reader_tool
@@ -113,5 +116,10 @@ def build_registry(config, confirm_callback=None) -> ToolRegistry:
     registry.register(create_file_reader_tool())
     registry.register(create_file_editor_tool(config=config))
     registry.register(create_file_writer_tool(config=config))
+
+    # Register dispatch_agents only when LLM + tracker are provided
+    if llm is not None and tracker is not None:
+        from src.tools.agent_dispatch import create_agent_dispatch_tool
+        registry.register(create_agent_dispatch_tool(config, llm, tracker, registry, event_bus=event_bus))
 
     return registry

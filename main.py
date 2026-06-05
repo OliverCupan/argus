@@ -5,9 +5,13 @@ Entry point. Loads config, fetches live model pricing, starts the CLI.
 Set ARGUS_LOG_LEVEL=DEBUG for verbose logging.
 """
 
+# Force UTF-8 I/O on Windows (Git Bash / cmd) before any imports touch sys.stdout.
+# No-ops on Linux/Mac where UTF-8 is already the default.
+import os
+os.environ.setdefault("PYTHONUTF8", "1")
+
 import asyncio
 import logging
-import os
 import sys
 from pathlib import Path
 

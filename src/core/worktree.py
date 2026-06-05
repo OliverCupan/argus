@@ -80,51 +80,74 @@ class WorktreeManager:
 
     async def merge_back(self, agent_name: str, main_dir: str = ".") -> str:
         """
-        Merge changes from the agent's worktree back to the main working tree.
-        Uses git diff + apply for a clean, conflict-aware merge.
-        Returns a summary string of what changed.
+        Merge UNCOMMITTED changes from the agent's worktree back to the main working tree.
+
+        The Coder edits files directly without committing, so we diff against HEAD
+        (staged + unstaged changes) rather than between commits.
+        Falls back to file-copy if git apply conflicts.
         """
         wt_path = self._active.get(agent_name)
         if wt_path is None or not wt_path.exists():
             return f"No active worktree for {agent_name}"
 
-        # Get the diff from the worktree branch relative to the original commit
+        # Diff uncommitted working-tree changes against HEAD
+        # Include all tracked modifications; untracked new files handled by fallback
         rc, diff, stderr = await _run(
-            "git", "-C", str(wt_path),
-            "diff", "HEAD~1", "HEAD",  # diff of the Coder's commits
+            "git", "-C", str(wt_path), "diff", "HEAD",
         )
         if rc != 0:
             logger.error("Failed to get diff for %s: %s", agent_name, stderr)
             return f"Could not get diff: {stderr}"
 
-        if not diff.strip():
+        # Also check for new (untracked) files
+        rc2, untracked_out, _ = await _run(
+            "git", "-C", str(wt_path), "ls-files", "--others", "--exclude-standard"
+        )
+
+        if not diff.strip() and not untracked_out.strip():
             return f"No changes in worktree for {agent_name}"
 
-        # Apply the patch to the main tree
-        rc, _, stderr = await _run(
-            "git", "apply", "--3way",
-            stdin=diff.encode(),
-        )
-        if rc != 0:
-            logger.warning("Merge conflict applying %s worktree: %s", agent_name, stderr)
-            # Fall back: copy files directly
-            return await self._fallback_copy(agent_name, wt_path, main_dir)
+        merged_parts: list[str] = []
 
-        # Count changed files
-        changed = diff.count("\ndiff --git")
-        logger.info("Merged worktree for %s: %d file(s) changed", agent_name, changed)
-        return f"Merged {changed} file change(s) from {agent_name} worktree"
+        # Apply patch for modified tracked files
+        if diff.strip():
+            rc, _, stderr = await _run(
+                "git", "apply", "--3way",
+                stdin=diff.encode(),
+            )
+            if rc != 0:
+                logger.warning("git apply failed for %s: %s — using file-copy fallback", agent_name, stderr)
+                copy_result = await self._fallback_copy_diff(agent_name, wt_path, main_dir)
+                merged_parts.append(copy_result)
+            else:
+                changed = diff.count("\ndiff --git")
+                merged_parts.append(f"{changed} tracked file(s) merged")
 
-    async def _fallback_copy(self, agent_name: str, wt_path: Path, main_dir: str) -> str:
+        # Copy untracked new files directly
+        if untracked_out.strip():
+            copied = 0
+            for rel_path in untracked_out.strip().splitlines():
+                src = wt_path / rel_path
+                dst = Path(main_dir) / rel_path
+                if src.exists():
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dst)
+                    copied += 1
+            merged_parts.append(f"{copied} new file(s) copied")
+
+        summary = ", ".join(merged_parts)
+        logger.info("Merged worktree for %s: %s", agent_name, summary)
+        return f"Merged from {agent_name} worktree: {summary}"
+
+    async def _fallback_copy_diff(self, agent_name: str, wt_path: Path, main_dir: str) -> str:
         """
-        Fallback merge: copy changed files directly from worktree to main tree.
-        Used when git apply fails (e.g., no common ancestor).
+        Fallback: copy all modified tracked files directly from worktree to main tree.
         """
         rc, changed_files_out, _ = await _run(
-            "git", "-C", str(wt_path), "diff", "--name-only", "HEAD~1", "HEAD"
+            "git", "-C", str(wt_path), "diff", "--name-only", "HEAD"
         )
         if rc != 0 or not changed_files_out.strip():
-            return "Fallback merge: no changed files found"
+            return "fallback: no tracked changes found"
 
         copied = 0
         for rel_path in changed_files_out.strip().splitlines():
@@ -135,7 +158,7 @@ class WorktreeManager:
                 shutil.copy2(src, dst)
                 copied += 1
 
-        return f"Fallback merge: copied {copied} file(s) from {agent_name} worktree"
+        return f"fallback: copied {copied} file(s)"
 
     async def diff(self, agent_name: str) -> str:
         """Show what changed in this worktree compared to HEAD."""
@@ -180,7 +203,8 @@ async def _run(*args: str, stdin: bytes = b"") -> tuple[int, str, str]:
             proc.communicate(input=stdin if stdin else None),
             timeout=60.0,
         )
-        return proc.returncode or 0, stdout_b.decode(errors="replace"), stderr_b.decode(errors="replace")
+        rc = proc.returncode if proc.returncode is not None else 1
+        return rc, stdout_b.decode(errors="replace"), stderr_b.decode(errors="replace")
     except asyncio.TimeoutError:
         return 1, "", "timeout"
     except FileNotFoundError:

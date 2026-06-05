@@ -14,6 +14,14 @@ from src.config import TokenBudget
 if TYPE_CHECKING:
     from src.core.pricing import ModelPricing
 
+# Inline fallback prices used when no ModelPricing registry is attached.
+_INLINE_FALLBACK: dict[str, dict[str, float]] = {
+    "claude-sonnet-4-20250514":  {"input": 3.00,  "output": 15.00},
+    "claude-haiku-4-5-20251001": {"input": 0.80,  "output": 4.00},
+    "claude-3-5-haiku-20241022": {"input": 0.80,  "output": 4.00},
+}
+_INLINE_DEFAULT: dict[str, float] = {"input": 3.00, "output": 15.00}
+
 
 @dataclass
 class AgentUsage:
@@ -34,34 +42,35 @@ class TokenTracker:
     total_cost: float = 0.0
     warnings_fired: list[str] = field(default_factory=list)
     started_at: datetime = field(default_factory=datetime.now)
-    # Last-task snapshot for per-task cost display (Step 2)
-    _last_snapshot: Optional[dict] = field(default=None, repr=False)
+    # Per-task usage: reset at the start of each user-initiated task so that
+    # per_agent caps apply per-task, not as a session lifetime limit.
+    task_usage: dict[str, AgentUsage] = field(default_factory=dict)
 
     def _get_price(self, model: str) -> dict:
         """Get model pricing, using live registry if available."""
         if self.pricing is not None:
             return self.pricing.get_price(model)
-        # Inline fallback if no pricing registry attached yet
-        _FALLBACK = {
-            "claude-sonnet-4-20250514":  {"input": 3.00, "output": 15.00},
-            "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
-            "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00},
-        }
-        return _FALLBACK.get(model, {"input": 3.00, "output": 15.00})
+        return _INLINE_FALLBACK.get(model, _INLINE_DEFAULT)
+
+    def reset_task_usage(self) -> None:
+        """Reset per-task counters. Call at the start of each user-initiated task."""
+        self.task_usage = {}
 
     def add(self, agent_name: str, input_tokens: int, output_tokens: int, model: str):
         """Record token usage from an API call."""
         if agent_name not in self.usage:
             self.usage[agent_name] = AgentUsage()
+        if agent_name not in self.task_usage:
+            self.task_usage[agent_name] = AgentUsage()
 
         pricing = self._get_price(model)
         cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
 
-        agent = self.usage[agent_name]
-        agent.input_tokens += input_tokens
-        agent.output_tokens += output_tokens
-        agent.cost_usd += cost
-        agent.calls += 1
+        for bucket in (self.usage[agent_name], self.task_usage[agent_name]):
+            bucket.input_tokens += input_tokens
+            bucket.output_tokens += output_tokens
+            bucket.cost_usd += cost
+            bucket.calls += 1
 
         self.total_input += input_tokens
         self.total_output += output_tokens
@@ -99,11 +108,15 @@ class TokenTracker:
         return token_soft or dollar_soft
 
     def is_agent_cap_reached(self, agent_name: str) -> bool:
-        """Check if a specific agent exceeded its token budget."""
+        """Check if a specific agent exceeded its per-task token cap.
+
+        Checks task_usage (resets each task) rather than the lifetime session
+        total, so explorers and auditors can run fresh on every task.
+        """
         agent_cap = self.budget.per_agent.get(agent_name)
         if not agent_cap:
             return False
-        agent = self.usage.get(agent_name, AgentUsage())
+        agent = self.task_usage.get(agent_name, AgentUsage())
         return (agent.input_tokens + agent.output_tokens) >= agent_cap
 
     def set_budget(self, field_name: str, value: float) -> bool:

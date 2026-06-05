@@ -8,12 +8,16 @@ Handles:
 - Token count reporting for tracking
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 
 import anthropic
 
 from src.config import ArgusConfig
+
+_RATE_LIMIT_RETRIES = 4        # max retries on rate-limit (429)
+_RATE_LIMIT_BASE_DELAY = 15.0  # seconds — initial back-off
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +79,21 @@ class LLMClient:
 
         logger.debug("LLM call: model=%s, messages=%d", model, len(messages))
 
-        response = await self.client.messages.create(**params)
+        last_exc: Exception | None = None
+        for attempt in range(_RATE_LIMIT_RETRIES + 1):
+            try:
+                response = await self.client.messages.create(**params)
+                break  # success
+            except anthropic.RateLimitError as e:
+                last_exc = e
+                if attempt >= _RATE_LIMIT_RETRIES:
+                    raise
+                delay = _RATE_LIMIT_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    "Rate limit hit (attempt %d/%d) — retrying in %.0fs",
+                    attempt + 1, _RATE_LIMIT_RETRIES, delay,
+                )
+                await asyncio.sleep(delay)
 
         parsed = self._parse_response(response)
         logger.debug(

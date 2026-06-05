@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Argus — Multi-Agent Coding Assistant</title>
+
+  <link rel="stylesheet" href="/static/css/main.css" />
+  <link rel="stylesheet" href="/static/css/agents.css" />
+  <link rel="stylesheet" href="/static/css/anims.css" />
+
+  <!-- marked.js for Markdown rendering (CDN, no build step) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+</head>
+<body>
+
+<!-- ═══════════════════════════ TOP BAR ═══════════════════════════ -->
+<header class="topbar">
+  <div class="topbar-eye">
+    <!-- Animated Argus Eye SVG -->
+    <svg class="argus-eye" viewBox="0 0 80 50" xmlns="http://www.w3.org/2000/svg">
+      <ellipse class="eye-outer" cx="40" cy="25" rx="36" ry="22" />
+      <ellipse class="eye-iris"  cx="40" cy="25" rx="15" ry="15" />
+      <circle  class="eye-pupil" cx="40" cy="25" r="7" />
+      <circle  class="eye-catch" cx="44" cy="20" r="2.5" />
+      <ellipse class="eye-lid-top" cx="40" cy="6"  rx="36" ry="10" />
+      <ellipse class="eye-lid-bot" cx="40" cy="44" rx="36" ry="10" />
+    </svg>
+    <span class="topbar-title">Argus</span>
+    <span class="conn-badge" id="conn-count" title="Active connections">0</span>
+  </div>
+
+  <div class="topbar-tokens" id="token-bar">
+    <div class="token-gauge">
+      <span class="token-label">Tokens</span>
+      <div class="gauge-track">
+        <div class="gauge-fill" id="token-fill" style="width:0%"></div>
+      </div>
+      <span class="token-value" id="token-value">0 / 500K</span>
+    </div>
+    <div class="token-gauge">
+      <span class="token-label">Cost</span>
+      <div class="gauge-track">
+        <div class="gauge-fill cost-fill" id="cost-fill" style="width:0%"></div>
+      </div>
+      <span class="token-value" id="cost-value">$0.0000 / $5.00</span>
+    </div>
+    <div class="task-delta" id="task-delta"></div>
+  </div>
+
+  <button class="icon-btn" id="settings-btn" title="Settings" aria-label="Settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+    </svg>
+  </button>
+</header>
+
+<!-- ══════════════════════════ AGENT GRID ═════════════════════════ -->
+<section class="agents-grid" id="agents-grid">
+  <!-- Cards injected by agents.js -->
+</section>
+
+<!-- ═════════════════════════ SHARED TIMELINE ════════════════════ -->
+<section class="timeline-section">
+  <div class="timeline-header">
+    <span class="section-title">Activity</span>
+    <div class="timeline-filters" id="timeline-filters">
+      <button class="filter-btn active" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="tool_call">Tools</button>
+      <button class="filter-btn" data-filter="agent_text">Text</button>
+      <button class="filter-btn" data-filter="status_update">Status</button>
+      <button class="filter-btn" data-filter="error">Errors</button>
+    </div>
+    <button class="icon-btn" id="clear-timeline-btn" title="Clear timeline">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/>
+      </svg>
+    </button>
+  </div>
+  <div class="timeline-feed" id="timeline-feed">
+    <div class="timeline-empty">Waiting for activity…</div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ INPUT AREA ════════════════════════ -->
+<footer class="input-area">
+  <div class="input-wrap">
+    <textarea
+      id="cmd-input"
+      class="cmd-textarea"
+      placeholder="Enter a coding task, or: audit &lt;path&gt;  ·  fix &lt;n&gt;  ·  model  ·  budget  ·  stats"
+      rows="1"
+      autocomplete="off"
+      spellcheck="false"
+    ></textarea>
+    <div class="input-hint" id="cmd-hint"></div>
+  </div>
+  <button class="send-btn" id="send-btn" title="Send  (Ctrl+Enter)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="22" y1="2" x2="11" y2="13"/>
+      <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+    </svg>
+  </button>
+</footer>
+
+<!-- ═════════════════════ CONFIRM MODAL ══════════════════════════ -->
+<div class="modal-overlay hidden" id="confirm-overlay">
+  <div class="modal-card" id="confirm-card">
+    <div class="modal-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" width="20" height="20">
+        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <span>Review Required</span>
+    </div>
+    <p class="modal-desc">The agent wants to run this command:</p>
+    <pre class="modal-cmd" id="confirm-cmd"></pre>
+    <div class="modal-countdown">Auto-deny in <span id="confirm-countdown">60</span>s</div>
+    <div class="modal-actions">
+      <button class="btn-deny"    id="confirm-deny">Deny</button>
+      <button class="btn-approve" id="confirm-approve">Approve</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SETTINGS PANEL ════════════════════════ -->
+<div class="modal-overlay hidden" id="settings-overlay">
+  <div class="modal-card settings-card">
+    <div class="modal-title">
+      <span>Settings</span>
+      <button class="icon-btn" id="settings-close">✕</button>
+    </div>
+    <div id="settings-body">Loading…</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════ SCRIPTS ═══════════════════════════ -->
+<script src="/static/js/agents.js"></script>
+<script src="/static/js/timeline.js"></script>
+<script src="/static/js/dashboard.js"></script>
+<script src="/static/js/input.js"></script>
+<script src="/static/js/confirm.js"></script>
+<script src="/static/js/app.js"></script>
+
+</body>
+</html>

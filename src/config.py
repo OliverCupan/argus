@@ -44,16 +44,18 @@ class SafetyConfig:
 @dataclass
 class ContextConfig:
     max_history_tokens: int = 50000
-    compaction_threshold: int = 1000          # Tier 1/2 boundary (Step 7)
-    compaction_model: str = "claude-3-5-haiku-20241022"
+    compaction_threshold: int = 3000          # Tier 1/2 boundary — below this, pass through uncompacted
+    compaction_model: str = "claude-haiku-4-5-20251001"
     max_context_injection_pct: float = 0.30   # max % of history for injected context
 
 
 @dataclass
 class AgentConfig:
     max_iterations: int = 15
+    max_iterations_per_agent: dict = field(default_factory=dict)
     bash_timeout: int = 30
     parallel_audit: bool = True
+    max_dispatch_workers: int = 5
     use_worktrees: bool = False               # opt-in git worktree isolation
     worktree_dir: str = ".argus/worktrees"
 
@@ -120,8 +122,8 @@ def load_config(path: Path) -> ArgusConfig:
     ctx = raw.get("context", {})
     config.context = ContextConfig(
         max_history_tokens=ctx.get("max_history_tokens", 50000),
-        compaction_threshold=ctx.get("compaction_threshold", 1000),
-        compaction_model=ctx.get("compaction_model", "claude-3-5-haiku-20241022"),
+        compaction_threshold=ctx.get("compaction_threshold", 3000),
+        compaction_model=ctx.get("compaction_model", "claude-haiku-4-5-20251001"),
         max_context_injection_pct=float(ctx.get("max_context_injection_pct", 0.30)),
     )
 
@@ -129,8 +131,10 @@ def load_config(path: Path) -> ArgusConfig:
     agent = raw.get("agent", {})
     config.agent = AgentConfig(
         max_iterations=agent.get("max_iterations", 15),
+        max_iterations_per_agent=agent.get("max_iterations_per_agent", {}),
         bash_timeout=agent.get("bash_timeout", 30),
         parallel_audit=agent.get("parallel_audit", True),
+        max_dispatch_workers=agent.get("max_dispatch_workers", 5),
         use_worktrees=agent.get("use_worktrees", False),
         worktree_dir=agent.get("worktree_dir", ".argus/worktrees"),
     )
@@ -160,3 +164,16 @@ def _validate(config: ArgusConfig):
             "models.coder must be set in argus.yaml.\n"
             "  Example: coder: claude-sonnet-4-20250514"
         )
+
+
+# Canonical ordered list of all agent names — shared by CLI and GUI.
+AGENT_NAMES: list[str] = [
+    "orchestrator",
+    "challenger",
+    "coder",
+    "explorer",
+    "security_auditor",
+    "bug_auditor",
+    "performance_auditor",
+    "test_auditor",
+]

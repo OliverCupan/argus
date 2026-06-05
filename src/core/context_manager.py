@@ -219,23 +219,52 @@ class ContextManager:
         # Drop lowest-importance messages first (stable sort preserves order for equal scores)
         scored.sort(key=lambda x: x[1])
 
-        drop_idx = set()
+        drop_idx: set[int] = set()
         for i, score, msg in scored:
             if total <= limit:
                 break
             if score >= 80:
                 break  # don't drop high-importance messages
+
+            is_tool_result = (
+                msg.get("role") == "user"
+                and isinstance(msg.get("content"), list)
+            )
+            # Never drop a tool_result in isolation — it must be paired with its
+            # preceding assistant message. If that assistant is NOT being dropped,
+            # dropping only the tool_result would leave the assistant's tool_use
+            # blocks without matching results (Anthropic API error).
+            if is_tool_result and i > 0 and (i - 1) not in drop_idx:
+                continue
+
             drop_idx.add(i)
             total -= self._estimate_message_tokens(msg)
             logger.debug("Trimmed message (score=%d, role=%s)", score, msg.get("role"))
 
+            # When dropping an assistant, also co-drop the following tool-result
+            # so there are no orphaned tool_use blocks in the history.
+            if msg.get("role") == "assistant" and i + 1 < len(middle):
+                next_msg = middle[i + 1]
+                if (
+                    next_msg.get("role") == "user"
+                    and isinstance(next_msg.get("content"), list)
+                ):
+                    drop_idx.add(i + 1)
+                    total -= self._estimate_message_tokens(next_msg)
+
+        if not drop_idx:
+            # Nothing could be dropped (all messages are high-importance) — return as-is
+            return messages
+
         remaining = [m for i, m in enumerate(middle) if i not in drop_idx]
 
-        trimmed_note: dict = {
-            "role": "user",
-            "content": "[Earlier conversation context trimmed to fit context window]",
-        }
-        result = [first_msg, trimmed_note] + remaining
+        # Append trim notice to the first message's content rather than inserting a
+        # separate user message — this avoids consecutive user-user turn violations.
+        note = " [Note: earlier context trimmed to fit context window]"
+        if isinstance(first_msg.get("content"), str):
+            first_msg = {**first_msg, "content": first_msg["content"] + note}
+
+        result = [first_msg] + remaining
         logger.debug("History trimmed: %d → %d messages", len(messages), len(result))
         return result
 

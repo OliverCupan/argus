@@ -76,6 +76,7 @@ class ModelPricing:
         self._model_count: int = len(_BUNDLED_DEFAULTS)
         self._cache_path: Path = cache_path or Path(".argus/pricing_cache.json")
         self._overrides_path: Optional[Path] = overrides_path
+        self._cache_age_hours: Optional[float] = None  # set when cache is loaded
 
     # ------------------------------------------------------------------ #
     #  Public interface                                                    #
@@ -96,6 +97,8 @@ class ModelPricing:
             logger.debug("Pricing loaded from cache (%d models)", self._model_count)
             self._apply_overrides()
             return "cached"
+        # Reset cache age on fresh fetch
+        self._cache_age_hours = None
 
         # Cache missing or stale — try live fetch
         live = await self._fetch_live()
@@ -140,11 +143,8 @@ class ModelPricing:
     def status_line(self) -> str:
         """One-line description of the pricing source for display in the banner."""
         age_note = ""
-        if self._source == "cached":
-            meta = self._load_cache_meta()
-            if meta:
-                age_h = meta.get("age_hours", 0)
-                age_note = f", {age_h:.0f}h old"
+        if self._source == "cached" and self._cache_age_hours is not None:
+            age_note = f", {self._cache_age_hours:.0f}h old"
         return f"Pricing: {self._source} ({self._model_count} models{age_note})"
 
     # ------------------------------------------------------------------ #
@@ -220,37 +220,25 @@ class ModelPricing:
             logger.warning("Pricing: failed to load overrides: %s", e)
 
     def _load_cache(self) -> Optional[dict[str, dict[str, float]]]:
-        """Load cache if it exists and is fresher than TTL. Returns None otherwise."""
+        """Load cache if it exists and is fresher than TTL. Returns None otherwise.
+        Side-effect: sets self._cache_age_hours when cache is valid."""
         if not self._cache_path.exists():
             return None
         try:
             raw = json.loads(self._cache_path.read_text())
             fetched_at = datetime.fromisoformat(raw["fetched_at"])
-            # Ensure timezone-aware comparison
             now = datetime.now(timezone.utc)
             if fetched_at.tzinfo is None:
                 fetched_at = fetched_at.replace(tzinfo=timezone.utc)
             age = now - fetched_at
+            age_hours = age.total_seconds() / 3600
             if age > timedelta(hours=_CACHE_TTL_HOURS):
-                logger.debug("Pricing cache expired (%.1fh old)", age.total_seconds() / 3600)
+                logger.debug("Pricing cache expired (%.1fh old)", age_hours)
                 return None
+            self._cache_age_hours = age_hours   # cache the age for status_line()
             return raw["prices"]
         except Exception as e:
             logger.debug("Pricing cache unreadable: %s", e)
-            return None
-
-    def _load_cache_meta(self) -> Optional[dict]:
-        """Load cache metadata for status display."""
-        if not self._cache_path.exists():
-            return None
-        try:
-            raw = json.loads(self._cache_path.read_text())
-            fetched_at = datetime.fromisoformat(raw["fetched_at"])
-            now = datetime.now(timezone.utc)
-            if fetched_at.tzinfo is None:
-                fetched_at = fetched_at.replace(tzinfo=timezone.utc)
-            return {"age_hours": (now - fetched_at).total_seconds() / 3600}
-        except Exception:
             return None
 
     def _save_cache(self, prices: dict[str, dict[str, float]]) -> None:

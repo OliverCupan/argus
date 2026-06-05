@@ -28,7 +28,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from src.config import ArgusConfig
+from src.config import ArgusConfig, AGENT_NAMES
 from src.core.token_tracker import TokenTracker
 from src.core.pricing import ModelPricing
 from src.agents.orchestrator import Orchestrator
@@ -37,7 +37,7 @@ from src.ui.eye import get_eye
 console = Console()
 
 _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-_SPINNER_WIDTH = 88
+_SPINNER_WIDTH = 120
 
 _SEV_STYLES = {
     "CRITICAL": "bold red",
@@ -46,11 +46,8 @@ _SEV_STYLES = {
     "LOW":      "dim",
 }
 
-# Agents that can have their model changed at runtime
-_AGENT_NAMES = [
-    "orchestrator", "challenger", "coder", "explorer",
-    "security_auditor", "bug_auditor", "performance_auditor", "test_auditor",
-]
+# Agents that can have their model changed at runtime (imported from config)
+_AGENT_NAMES = AGENT_NAMES
 
 # Budget fields editable at runtime
 _BUDGET_FIELDS = {
@@ -120,7 +117,9 @@ class ArgusCliApp:
             while True:
                 if not self._spinner_paused:
                     frame = next(frames)
-                    line = f"\r  {frame}  {self._current_status}"
+                    summary = self.token_tracker.get_summary()
+                    cost_str = f"${summary['total_cost_usd']:.4f} · {summary['total_tokens']:,}t"
+                    line = f"\r  {frame}  {self._current_status}  [{cost_str}]"
                     sys.stdout.write(line.ljust(_SPINNER_WIDTH))
                     sys.stdout.flush()
                 await asyncio.sleep(0.12)
@@ -200,7 +199,21 @@ class ArgusCliApp:
                     self._print_token_line()
                 continue
 
-            # Coding / audit task
+            # audit <path> — handled before WD augmentation so the regex in
+            # orchestrator.handle() sees the raw "audit ..." prefix, not the header.
+            audit_match = re.match(r"^audit\b(.*)", user_input, re.IGNORECASE | re.DOTALL)
+            if audit_match:
+                target = audit_match.group(1).strip() or "."
+                cwd = os.getcwd()
+                augmented = f"[Working directory: {cwd}]\n\naudit {target}"
+                result_text = await self._run_agent(self.orchestrator.handle(augmented))
+                if result_text is None:
+                    continue
+                self._print_response(result_text)
+                self._print_token_line()
+                continue
+
+            # All other inputs — coding tasks
             cwd = os.getcwd()
             augmented = f"[Working directory: {cwd}]\n\n{user_input}"
             result_text = await self._run_agent(self.orchestrator.handle(augmented))
@@ -300,13 +313,18 @@ class ArgusCliApp:
         table.add_column("Model")
         table.add_column("Cost / 1M tokens", justify="right", style="dim")
 
+        pricing_src = self.pricing or self.token_tracker  # prefer live registry
+
         for agent in _AGENT_NAMES:
-            model_name = models.get(agent, "—")
-            price = self.token_tracker._get_price(model_name) if model_name else {}
-            cost_str = (
-                f"${price.get('input', 0):.2f} in / ${price.get('output', 0):.2f} out"
-                if price else "—"
-            )
+            model_name = models.get(agent) or ""
+            if model_name and self.pricing is not None:
+                price = self.pricing.get_price(model_name)
+                cost_str = f"${price.get('input', 0):.2f} in / ${price.get('output', 0):.2f} out"
+            elif model_name:
+                price = self.token_tracker._get_price(model_name)
+                cost_str = f"${price.get('input', 0):.2f} in / ${price.get('output', 0):.2f} out"
+            else:
+                cost_str = "[dim]—[/dim]"
             table.add_row(agent, model_name or "[dim]not set[/dim]", cost_str)
 
         console.print(table)
@@ -381,10 +399,13 @@ class ArgusCliApp:
         width = console.width or 120
         eye_art = get_eye(width)
         if eye_art:
-            eye_text = Text.from_markup(eye_art)
-            console.print(Columns([left, eye_text], expand=True))
-        else:
-            console.print(left)
+            try:
+                eye_text = Text.from_markup(eye_art)
+                console.print(Columns([left, eye_text], expand=True))
+                return
+            except (UnicodeEncodeError, Exception):
+                pass  # fall through to plain banner on terminals that can't render Unicode
+        console.print(left)
 
     def _print_stats(self):
         summary = self.token_tracker.get_summary()

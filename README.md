@@ -39,14 +39,14 @@ User Input
 
 | Agent | Model | Role |
 |---|---|---|
-| Orchestrator | Haiku 4.5 | Routes intent, coordinates pipeline |
-| Explorer | Haiku 3.5 | Maps codebase, reads relevant files |
-| Challenger | Haiku 4.5 | Critiques the plan before coding starts |
-| Coder | Haiku 4.5 | Makes surgical edits, verifies with tests |
-| SecurityAuditor | Haiku 4.5 | Finds injection, secrets, auth issues |
-| BugAuditor | Haiku 4.5 | Finds logic errors, null refs, type mismatches |
-| PerformanceAuditor | Haiku 3.5 | Finds O(n²), N+1 queries, blocking I/O |
-| TestAuditor | Haiku 3.5 | Runs pytest, spots untested paths |
+| Orchestrator | claude-haiku-4-5-20251001 | Routes intent, coordinates pipeline |
+| Explorer | claude-haiku-4-5-20251001 | Maps codebase, reads relevant files |
+| Challenger | claude-sonnet-4-6 | Critiques the plan before coding starts |
+| Coder | claude-sonnet-4-6 | Makes surgical edits, verifies with tests |
+| SecurityAuditor | claude-haiku-4-5-20251001 | Finds injection, secrets, auth issues |
+| BugAuditor | claude-haiku-4-5-20251001 | Finds logic errors, null refs, type mismatches |
+| PerformanceAuditor | claude-haiku-4-5-20251001 | Finds O(n²), N+1 queries, blocking I/O |
+| TestAuditor | claude-haiku-4-5-20251001 | Runs pytest, spots untested paths |
 
 ---
 
@@ -190,14 +190,7 @@ argus/
 │       └── safety.py
 │   └── agents/
 │       ├── orchestrator.py
-│       ├── explorer.py
-│       ├── challenger.py
-│       ├── coder.py
-│       └── auditors/
-│           ├── security.py
-│           ├── bugs.py
-│           ├── performance.py
-│           └── tests.py
+│       └── definitions.py      # All 7 agent definitions as AgentDefinition dataclasses
 └── demo/
     └── buggy_app/
 ```
