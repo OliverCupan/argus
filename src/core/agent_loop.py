@@ -7,6 +7,7 @@ All agents (explorer, coder, auditors) inherit from this base class.
 Each subclass defines its own system prompt, model, and allowed tools.
 """
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -208,7 +209,11 @@ class BaseAgent:
                 )
 
             # --- Track tokens ---
-            self.tracker.add(self.name, response.input_tokens, response.output_tokens, model)
+            self.tracker.add(
+                self.name, response.input_tokens, response.output_tokens, model,
+                cache_creation_tokens=response.cache_creation_tokens,
+                cache_read_tokens=response.cache_read_tokens,
+            )
             total_in += response.input_tokens
             total_out += response.output_tokens
 
@@ -234,9 +239,8 @@ class BaseAgent:
             # Append assistant message ONCE with the raw content blocks
             messages.append({"role": "assistant", "content": response.raw_content})
 
-            # Execute all tool calls and collect results into a SINGLE user message
-            tool_results: list[dict] = []
-            for tool_call in response.tool_calls:
+            # Execute all tool calls concurrently and collect results into a SINGLE user message
+            async def _execute_one(tool_call: dict) -> dict:
                 logger.debug("[%s] Calling tool: %s", self.name, tool_call["name"])
                 input_preview = str(tool_call["input"])[:200]
                 await self._emit(
@@ -272,7 +276,11 @@ class BaseAgent:
                 if result.startswith(("Error:", "BLOCKED:", "DENIED:")):
                     tool_result_block["is_error"] = True
 
-                tool_results.append(tool_result_block)
+                return tool_result_block
+
+            tool_results = list(
+                await asyncio.gather(*[_execute_one(tc) for tc in response.tool_calls])
+            )
 
             # Soft cap: append wind-down notice as a text block IN the same user message
             # (cannot add a separate user message — Anthropic requires alternating turns)

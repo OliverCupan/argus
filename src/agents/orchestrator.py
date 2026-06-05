@@ -411,21 +411,28 @@ class Orchestrator:
         # can start editing immediately without wasting iterations on reads.
         # Cap total injected file content at 30k chars (same as _read_files_as_context).
         _INJECT_MAX_CHARS = 30_000
+
+        async def _read_or_none(hint: str) -> str | None:
+            hp = Path(hint)
+            if not hp.is_file():
+                return None
+            return await asyncio.to_thread(hp.read_text, encoding="utf-8", errors="replace")
+
+        # Dispatch all file reads concurrently, then apply the cap in original order.
+        _read_results = await asyncio.gather(
+            *(_read_or_none(h) for h in path_hints), return_exceptions=True
+        )
         raw_file_sections: list[str] = []
         _inject_total = 0
-        for hint in path_hints:
+        for hint, result in zip(path_hints, _read_results):
             if _inject_total >= _INJECT_MAX_CHARS:
                 logger.debug("Coder injection cap reached at %d chars — skipping remaining hints", _inject_total)
                 break
-            hp = Path(hint)
-            if hp.is_file():
-                try:
-                    text = hp.read_text(encoding="utf-8", errors="replace")
-                    snippet = text[:_INJECT_MAX_CHARS - _inject_total]
-                    raw_file_sections.append(f"### {hint}\n```\n{snippet}\n```")
-                    _inject_total += len(snippet)
-                except OSError:
-                    pass
+            if result is None or isinstance(result, BaseException):
+                continue
+            snippet = result[:_INJECT_MAX_CHARS - _inject_total]
+            raw_file_sections.append(f"### {hint}\n```\n{snippet}\n```")
+            _inject_total += len(snippet)
         raw_files_block = "\n\n".join(raw_file_sections)
 
         coder_context_parts = []

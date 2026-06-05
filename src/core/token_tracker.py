@@ -40,6 +40,8 @@ class TokenTracker:
     total_input: int = 0
     total_output: int = 0
     total_cost: float = 0.0
+    total_cache_creation: int = 0
+    total_cache_read: int = 0
     warnings_fired: list[str] = field(default_factory=list)
     started_at: datetime = field(default_factory=datetime.now)
     # Per-task usage: reset at the start of each user-initiated task so that
@@ -56,7 +58,15 @@ class TokenTracker:
         """Reset per-task counters. Call at the start of each user-initiated task."""
         self.task_usage = {}
 
-    def add(self, agent_name: str, input_tokens: int, output_tokens: int, model: str):
+    def add(
+        self,
+        agent_name: str,
+        input_tokens: int,
+        output_tokens: int,
+        model: str,
+        cache_creation_tokens: int = 0,
+        cache_read_tokens: int = 0,
+    ):
         """Record token usage from an API call."""
         if agent_name not in self.usage:
             self.usage[agent_name] = AgentUsage()
@@ -64,7 +74,12 @@ class TokenTracker:
             self.task_usage[agent_name] = AgentUsage()
 
         pricing = self._get_price(model)
-        cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+        cost = (
+            (input_tokens - cache_read_tokens) * pricing["input"]
+            + cache_read_tokens * pricing["input"] * 0.1
+            + cache_creation_tokens * pricing["input"] * 1.25
+            + output_tokens * pricing["output"]
+        ) / 1_000_000
 
         for bucket in (self.usage[agent_name], self.task_usage[agent_name]):
             bucket.input_tokens += input_tokens
@@ -75,6 +90,8 @@ class TokenTracker:
         self.total_input += input_tokens
         self.total_output += output_tokens
         self.total_cost += cost
+        self.total_cache_creation += cache_creation_tokens
+        self.total_cache_read += cache_read_tokens
 
         self._check_warnings(agent_name)
 
@@ -161,6 +178,8 @@ class TokenTracker:
             "dollar_soft_cap": self.budget.dollar_soft_cap,
             "percent_used": round(total_used / cap * 100, 1),
             "warnings": list(self.warnings_fired),
+            "cache_creation_tokens": self.total_cache_creation,
+            "cache_read_tokens": self.total_cache_read,
             "per_agent": {
                 name: {
                     "tokens": a.input_tokens + a.output_tokens,

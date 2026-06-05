@@ -32,6 +32,8 @@ class LLMResponse:
     input_tokens: int
     output_tokens: int
     model: str
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
 
 
 class LLMClient:
@@ -70,12 +72,25 @@ class LLMClient:
         params: dict = {
             "model": model,
             "max_tokens": max_tokens,
-            "system": system,
             "messages": messages,
         }
+
+        if self.config.enable_prompt_caching:
+            params["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+        else:
+            params["system"] = system
+
         # Only include tools if non-empty — sending tools=[] can cause API errors
         if tools:
-            params["tools"] = tools
+            if self.config.enable_prompt_caching:
+                # Shallow-copy list and last tool dict to avoid mutating the caller's data
+                tools_copy = list(tools)
+                last_tool = dict(tools_copy[-1])
+                last_tool["cache_control"] = {"type": "ephemeral"}
+                tools_copy[-1] = last_tool
+                params["tools"] = tools_copy
+            else:
+                params["tools"] = tools
 
         logger.debug("LLM call: model=%s, messages=%d", model, len(messages))
 
@@ -132,6 +147,9 @@ class LLMClient:
                     "input": block.input,
                 })
 
+        cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+
         return LLMResponse(
             content=content_text,
             tool_calls=tool_calls,
@@ -140,4 +158,6 @@ class LLMClient:
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
             model=response.model,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_read_tokens=cache_read_tokens,
         )

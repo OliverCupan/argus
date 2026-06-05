@@ -72,6 +72,8 @@ class ArgusConfig:
     context: ContextConfig = field(default_factory=ContextConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
 
+    enable_prompt_caching: bool = True
+
     # From environment
     anthropic_api_key: str = ""
     openai_api_key: str = ""
@@ -138,6 +140,9 @@ def load_config(path: Path) -> ArgusConfig:
         use_worktrees=agent.get("use_worktrees", False),
         worktree_dir=agent.get("worktree_dir", ".argus/worktrees"),
     )
+
+    # Prompt caching
+    config.enable_prompt_caching = raw.get("enable_prompt_caching", True)
 
     # API keys from environment
     config.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "")
