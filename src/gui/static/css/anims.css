@@ -1,32 +1,73 @@
 /* ================================================================
    Argus Web GUI — Keyframe animations
-   Per-agent avatar animations + global UI animations
    ================================================================ */
 
 /* ── Status dot pulse ────────────────────────────────────────── */
 @keyframes pulse-dot {
-  0%,100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.6); }
-  50%     { box-shadow: 0 0 0 4px rgba(34,197,94,0);  }
+  0%,100% { box-shadow: 0 0 0 0 rgba(34,197,94,.6); }
+  50%     { box-shadow: 0 0 0 4px rgba(34,197,94,0); }
 }
 
-/* ── Avatar ring spin ────────────────────────────────────────── */
+/* ── Avatar ring / arc spin ──────────────────────────────────── */
 @keyframes spin-ring {
   from { transform: rotate(0deg);   }
   to   { transform: rotate(360deg); }
 }
 
-/* ── Explorer — slow compass rotation ───────────────────────── */
+/* ── Halo pulse ──────────────────────────────────────────────── */
+@keyframes halo-pulse {
+  0%,100% { transform: translateX(-50%) scale(1);   opacity: .9; }
+  50%     { transform: translateX(-50%) scale(1.45); opacity: .35; }
+}
+
+/* ── Eye blink (top bar) ─────────────────────────────────────── */
+@keyframes eye-blink {
+  0%,90%,100% { transform: scaleY(1);    }
+  95%         { transform: scaleY(0.05); }
+}
+@keyframes eye-iris-pulse {
+  0%,100% { r: 15; opacity: 1;    }
+  50%     { r: 13; opacity: 0.85; }
+}
+.argus-eye {
+  animation: eye-blink 6s ease-in-out infinite;
+  transform-origin: center 25px;
+}
+.eye-iris {
+  animation: eye-iris-pulse 3s ease-in-out infinite;
+}
+
+/* ── Timeline entry slide-in ─────────────────────────────────── */
+@keyframes slide-in-right {
+  from { opacity:0; transform: translateX(10px); }
+  to   { opacity:1; transform: none; }
+}
+
+/* ── Modal appear ────────────────────────────────────────────── */
+@keyframes modal-in {
+  from { opacity:0; transform: translateY(-12px) scale(.97); }
+  to   { opacity:1; transform: none; }
+}
+
+/* ── Slide up ────────────────────────────────────────────────── */
+@keyframes slide-up {
+  from { opacity:0; transform: translateY(8px); }
+  to   { opacity:1; transform: none; }
+}
+
+/* ── Per-avatar SVG animations when running ──────────────────── */
+
+/* Explorer — compass rotation */
 @keyframes explorer-spin {
   from { transform: rotate(0deg);   }
   to   { transform: rotate(360deg); }
 }
-
-.agent-card[data-agent="explorer"].running .avatar-svg svg {
+.orbit-node[data-agent="explorer"].running .orbit-avatar svg {
   animation: explorer-spin 4s linear infinite;
   transform-origin: center;
 }
 
-/* ── Challenger — side-to-side shake ────────────────────────── */
+/* Challenger — shake */
 @keyframes challenger-shake {
   0%,100% { transform: translateX(0);    }
   20%     { transform: translateX(-3px); }
@@ -34,102 +75,60 @@
   60%     { transform: translateX(-2px); }
   80%     { transform: translateX(2px);  }
 }
-
-.agent-card[data-agent="challenger"].running .avatar-svg svg {
+.orbit-node[data-agent="challenger"].running .orbit-avatar svg {
   animation: challenger-shake 1.8s ease-in-out infinite;
 }
 
-/* ── Coder — cursor blink ────────────────────────────────────── */
+/* Coder — cursor blink */
 @keyframes coder-blink {
-  0%,49% { opacity: 1; }
+  0%,49%  { opacity: 1; }
   50%,100%{ opacity: 0; }
 }
-
-.agent-card[data-agent="coder"].running .cursor-bar {
+.orbit-node[data-agent="coder"].running .cursor-bar {
   animation: coder-blink 1s step-end infinite;
 }
 
-/* ── Security auditor — glow pulse ──────────────────────────── */
+/* Security — glow pulse */
 @keyframes security-glow {
   0%,100% { filter: drop-shadow(0 0 0px #ef4444); }
-  50%     { filter: drop-shadow(0 0 6px #ef4444); }
+  50%     { filter: drop-shadow(0 0 7px #ef4444); }
 }
-
-.agent-card[data-agent="security_auditor"].running .avatar-svg svg {
+.orbit-node[data-agent="security_auditor"].running .orbit-avatar svg {
   animation: security-glow 1.5s ease-in-out infinite;
 }
 
-/* ── Bug auditor — wiggle crawl ──────────────────────────────── */
+/* Bug auditor — wiggle */
 @keyframes bug-wiggle {
-  0%,100% { transform: rotate(0deg)   translateX(0);    }
-  25%     { transform: rotate(-8deg)  translateX(-2px); }
-  50%     { transform: rotate(0deg)   translateX(2px);  }
-  75%     { transform: rotate(8deg)   translateX(-1px); }
+  0%,100% { transform: rotate(0deg)  translateX(0);    }
+  25%     { transform: rotate(-8deg) translateX(-2px); }
+  50%     { transform: rotate(0deg)  translateX(2px);  }
+  75%     { transform: rotate(8deg)  translateX(-1px); }
 }
-
-.agent-card[data-agent="bug_auditor"].running .avatar-svg svg {
+.orbit-node[data-agent="bug_auditor"].running .orbit-avatar svg {
   animation: bug-wiggle 1.2s ease-in-out infinite;
   transform-origin: center;
 }
 
-/* ── Performance auditor — flash strobe ─────────────────────── */
+/* Performance — flash strobe */
 @keyframes perf-flash {
   0%,85%,100% { opacity: 1;   filter: none; }
-  90%,95%     { opacity: 0.4; filter: drop-shadow(0 0 4px #a855f7); }
+  90%,95%     { opacity: .4;  filter: drop-shadow(0 0 4px #a855f7); }
 }
-
-.agent-card[data-agent="performance_auditor"].running .avatar-svg svg {
+.orbit-node[data-agent="performance_auditor"].running .orbit-avatar svg {
   animation: perf-flash 1.4s ease-in-out infinite;
 }
 
-/* ── Test auditor — bubble rise ──────────────────────────────── */
+/* Test auditor — bubble rise */
 @keyframes test-bubble {
-  0%,100% { transform: translateY(0);   opacity: 1; }
-  50%     { transform: translateY(-4px); opacity: 0.8; }
+  0%,100% { transform: translateY(0);    opacity: 1;  }
+  50%     { transform: translateY(-4px); opacity: .8; }
 }
-
-.agent-card[data-agent="test_auditor"].running .avatar-svg svg {
+.orbit-node[data-agent="test_auditor"].running .orbit-avatar svg {
   animation: test-bubble 1.6s ease-in-out infinite;
 }
 
-/* ── Argus eye blink (top bar) ───────────────────────────────── */
-@keyframes eye-blink {
-  0%,90%,100% { transform: scaleY(1);   }
-  95%         { transform: scaleY(0.05); }
-}
-
-@keyframes eye-iris-pulse {
-  0%,100% { r: 15; opacity: 1;   }
-  50%     { r: 13; opacity: 0.85; }
-}
-
-.argus-eye {
-  animation: eye-blink 6s ease-in-out infinite;
-  transform-origin: center 25px;
-}
-
-.eye-iris {
-  animation: eye-iris-pulse 3s ease-in-out infinite;
-}
-
-/* ── Timeline entry slide-in ─────────────────────────────────── */
-@keyframes slide-in-right {
-  from { opacity:0; transform: translateX(12px); }
-  to   { opacity:1; transform: none; }
-}
-
-/* ── Modal appear ────────────────────────────────────────────── */
-/* (defined inline in main.css as @keyframes modal-in) */
-
-/* ── Global slide-up for result panel ───────────────────────── */
-@keyframes slide-up {
-  from { opacity:0; transform: translateY(8px); }
-  to   { opacity:1; transform: none; }
-}
-
 /* ── Idle state — animations paused ─────────────────────────── */
-.agent-card.idle .avatar-svg svg,
-.agent-card.idle .cursor-bar {
+.orbit-node.idle .orbit-avatar svg,
+.orbit-node.idle .cursor-bar {
   animation-play-state: paused;
-  opacity: 0.45;
 }

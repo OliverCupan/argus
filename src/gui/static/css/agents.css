@@ -1,162 +1,193 @@
 /* ================================================================
-   Argus Web GUI — Agent card styles + per-agent colors
+   Argus Web GUI — Orbital agent nodes + timeline entries
    ================================================================ */
 
-/* ── Agent card shell ────────────────────────────────────────── */
-.agent-card {
-  flex: 1 1 var(--card-min-w);
-  min-width: var(--card-min-w);
-  max-width: 280px;
+/* ── Orbit node ──────────────────────────────────────────────── */
+.orbit-node {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px;
-  transition: border-color 0.3s, box-shadow 0.3s;
-  overflow: hidden;
-  /* Frosted glass effect */
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  transition: border-color .2s, transform .2s, background .2s;
+  user-select: none;
 }
 
-/* Orchestrator card — slightly wider, top accent stripe */
-#card-orchestrator {
-  max-width: 320px;
-  border-top: 2px solid rgba(226,232,240,0.35);
+.orbit-node:hover {
+  background: rgba(255,255,255,.03);
+  border-color: var(--border);
+  transform: translateY(-1px);
 }
 
-/* State: running — border pulses with agent colour */
-.agent-card.running {
-  box-shadow: 0 0 0 1px var(--agent-color), 0 0 16px -4px var(--agent-color);
-}
-
-/* State: done */
-.agent-card.done {
+.orbit-node.running {
   border-color: var(--agent-color);
-  opacity: 0.9;
 }
 
-/* State: error */
-.agent-card.error {
-  border-color: var(--red);
-  box-shadow: 0 0 8px -2px var(--red);
+.orbit-node.idle {
+  opacity: .6;
 }
+.orbit-node.idle:hover { opacity: 1; }
 
-/* ── Card header ─────────────────────────────────────────────── */
-.card-header {
+.orbit-node.done {
+  border-color: var(--agent-color);
+  opacity: .85;
+}
+.orbit-node.error { border-color: var(--red); }
+
+/* ── Glow halo ───────────────────────────────────────────────── */
+.orbit-halo {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--agent-color-dim, transparent);
+  filter: blur(10px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .4s;
+}
+.orbit-node.running .orbit-halo { opacity: 1; animation: halo-pulse 2s ease infinite; }
+
+/* ── Avatar ──────────────────────────────────────────────────── */
+.orbit-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--agent-color-dim, rgba(255,255,255,.05));
+  border: 2px solid var(--border);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  justify-content: center;
+  color: var(--agent-color);
+  position: relative;
+  z-index: 1;
+  transition: border-color .3s;
 }
+.orbit-avatar svg { width: 20px; height: 20px; }
+.orbit-node.running .orbit-avatar { border-color: var(--agent-color); }
+.orbit-node.done    .orbit-avatar { border-color: var(--agent-color); opacity: .85; }
 
-.card-name {
-  font-size: 11px;
+/* Idle nodes get smaller avatars */
+.orbit-node.idle .orbit-avatar {
+  width: 36px;
+  height: 36px;
+}
+.orbit-node.idle .orbit-avatar svg { width: 16px; height: 16px; }
+
+/* ── Spinning arc ────────────────────────────────────────────── */
+.orbit-arc {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--agent-color);
+  opacity: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.orbit-node.running .orbit-arc { opacity: 1; animation: spin-ring 1.6s linear infinite; }
+
+/* ── Done checkmark overlay ──────────────────────────────────── */
+.orbit-check {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,.55);
+  opacity: 0;
+  transition: opacity .25s;
+  pointer-events: none;
+  color: var(--green);
+  font-size: 15px;
+  z-index: 3;
+}
+.orbit-node.done .orbit-check { opacity: 1; }
+
+/* ── Label + dot ─────────────────────────────────────────────── */
+.orbit-label {
+  font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: .05em;
   color: var(--agent-color, var(--text-dim));
+  text-align: center;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: var(--text-dim);
   flex-shrink: 0;
-  transition: background 0.3s;
 }
 .status-dot.idle    { background: #3a3a5a; }
 .status-dot.running { background: var(--green); animation: pulse-dot 1.2s ease infinite; }
-.status-dot.done    { background: var(--green); animation: none; }
-.status-dot.error   { background: var(--red);   animation: none; }
+.status-dot.done    { background: var(--green); }
+.status-dot.error   { background: var(--red); }
 
-/* ── Avatar + ring ───────────────────────────────────────────── */
-.avatar-wrap {
-  position: relative;
-  width: 46px;
-  height: 46px;
-  margin: 4px auto;
+/* ── Orbit card (expanded panel, fixed-positioned via JS) ──── */
+.orbit-card {
+  display: none;
+  position: fixed;
+  z-index: 200;
+  background: var(--bg-card);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--radius);
+  padding: 0;
+  min-width: 280px;
+  max-width: 380px;
+  box-shadow: 0 16px 48px rgba(0,0,0,.65);
+  overflow: hidden;
+}
+.orbit-node.expanded .orbit-card { display: flex; flex-direction: column; }
+
+.orbit-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
-.avatar-ring {
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  transition: border-color 0.3s;
+.orbit-card-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--agent-color, var(--text-dim));
 }
 
-.agent-card.running .avatar-ring {
-  border-color: var(--agent-color);
-  animation: spin-ring 3s linear infinite;
-}
-
-.agent-card.done .avatar-ring {
-  border-color: var(--agent-color);
-  animation: none;
-}
-
-.avatar-svg {
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  background: var(--agent-color-dim, rgba(255,255,255,0.05));
-  padding: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Checkmark overlay when done */
-.avatar-check {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0,0,0,0.55);
-  border-radius: 50%;
-  opacity: 0;
-  transition: opacity 0.25s;
-  pointer-events: none;
-  color: var(--green);
-  font-size: 18px;
-}
-.agent-card.done .avatar-check { opacity: 1; }
-
-/* ── Model label ─────────────────────────────────────────────── */
-.card-model {
+.orbit-card-model {
   font-size: 10px;
   color: var(--text-dim);
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-family: var(--font-mono);
 }
 
-/* ── Output area ─────────────────────────────────────────────── */
+/* Output area inside card */
 .card-output {
   flex: 1;
   overflow-y: auto;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text);
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 6px 8px;
+  padding: 6px 10px;
   min-height: 60px;
-  max-height: 160px;
+  max-height: 220px;
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.45;
+  background: var(--bg-base);
 }
 
 .card-output:empty::after {
@@ -165,147 +196,108 @@
   font-style: italic;
 }
 
-/* ── Structured output blocks ────────────────────────────────── */
-.output-block {
-  margin-bottom: 4px;
-  line-height: 1.4;
-}
-
-/* Task header: shown on agent_started */
-.output-task-header {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--agent-color, var(--text-dim));
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 3px;
-  margin-bottom: 5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.task-arrow {
-  margin-right: 5px;
-}
-
-/* Orchestrator status messages */
-.output-status {
-  color: var(--text-dim);
-  border-left: 2px solid rgba(226,232,240,0.3);
-  padding-left: 6px;
-  font-size: 10.5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Thinking/reasoning: agent_text */
-.output-thinking {
-  color: var(--text-dim);
-  border-left: 2px solid rgba(255,255,255,0.1);
-  padding-left: 6px;
-  font-size: 10.5px;
-  opacity: 0.85;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* Tool call + result group */
-.output-tool-group {
-  border-left: 2px solid rgba(147,197,253,0.4);
-  padding-left: 6px;
-}
-
-.output-tool-header {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: #93c5fd;
-  font-weight: 600;
-}
-.tool-icon { font-size: 10px; opacity: 0.8; }
-.tool-name { font-size: 11px; }
-
-.output-tool-input {
-  color: var(--text-dim);
-  font-size: 10px;
-  opacity: 0.7;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding-left: 14px;
-}
-
-.output-tool-result {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  padding-left: 14px;
-  font-size: 10.5px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.output-result-ok    { color: #86efac; }
-.output-result-error { color: var(--red); }
-
-.result-icon { flex-shrink: 0; font-size: 10px; }
-.tool-dur {
-  flex-shrink: 0;
-  font-size: 9px;
-  opacity: 0.6;
-  padding: 0 3px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-}
-
-/* Summary footer: agent_finished */
-.output-summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-top: 1px solid var(--border);
-  padding-top: 4px;
-  margin-top: 2px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--agent-color, var(--green));
-}
-.summary-check  { font-size: 11px; }
-.summary-iters  { color: var(--text-dim); font-weight: 400; }
-.summary-tokens { margin-left: auto; font-family: var(--font-mono); }
-
-/* Legacy span classes kept for any fallback paths */
-.output-tool-call   { color: #93c5fd; }
-.output-error       { color: var(--red); }
-.output-text        { color: var(--text); }
-
-/* ── Card footer (token count) ───────────────────────────────── */
-.card-footer {
+.orbit-card-footer {
   display: flex;
   justify-content: space-between;
   font-size: 10px;
   color: var(--text-dim);
   font-family: var(--font-mono);
+  padding: 5px 10px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
-.card-iter { color: var(--text-dim); }
+/* ── Structured output blocks ────────────────────────────────── */
+.output-block { margin-bottom: 3px; line-height: 1.4; }
 
-/* ── Per-agent colour binding (set via JS as CSS var) ────────── */
-/* Each card gets: style="--agent-color: #xxx; --agent-color-dim: rgba(...)" */
+.output-task-header {
+  font-size: 10px; font-weight: 600;
+  color: var(--agent-color, var(--text-dim));
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 3px; margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.task-arrow { margin-right: 4px; }
+
+.output-status {
+  color: var(--text-dim);
+  border-left: 2px solid rgba(226,232,240,.25);
+  padding-left: 5px;
+  font-size: 10px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.output-thinking {
+  color: var(--text-dim);
+  border-left: 2px solid rgba(255,255,255,.08);
+  padding-left: 5px;
+  font-size: 10px;
+  opacity: .8;
+  white-space: pre-wrap; word-break: break-word;
+}
+
+.output-tool-group {
+  border-left: 2px solid rgba(147,197,253,.35);
+  padding-left: 5px;
+}
+
+.output-tool-header {
+  display: flex; align-items: center; gap: 4px;
+  color: #93c5fd; font-weight: 600;
+}
+.tool-icon { font-size: 10px; opacity: .8; }
+.tool-name { font-size: 10.5px; }
+
+.output-tool-input {
+  color: var(--text-dim); font-size: 9.5px; opacity: .65;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding-left: 14px;
+}
+
+.output-tool-result {
+  display: flex; align-items: baseline; gap: 4px;
+  padding-left: 14px; font-size: 10px;
+  white-space: pre-wrap; word-break: break-word;
+}
+.output-result-ok    { color: #86efac; }
+.output-result-error { color: var(--red); }
+.result-icon { flex-shrink: 0; font-size: 9px; }
+.tool-dur {
+  flex-shrink: 0; font-size: 9px; opacity: .55;
+  padding: 0 3px; border: 1px solid var(--border); border-radius: 3px;
+}
+
+.output-summary {
+  display: flex; align-items: center; gap: 6px;
+  border-top: 1px solid var(--border); padding-top: 4px; margin-top: 2px;
+  font-size: 10px; font-weight: 600;
+  color: var(--agent-color, var(--green));
+}
+.summary-check  { font-size: 10px; }
+.summary-iters  { color: var(--text-dim); font-weight: 400; }
+.summary-tokens { margin-left: auto; font-family: var(--font-mono); }
+
+/* Fallback span classes */
+.output-tool-call { color: #93c5fd; }
+.output-error     { color: var(--red); }
+.output-text      { color: var(--text); }
 
 /* ── Timeline entry ──────────────────────────────────────────── */
 .tl-entry {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 4px 12px;
-  border-bottom: 1px solid rgba(255,255,255,0.03);
-  animation: slide-in-right 0.18s ease;
+  padding: 5px 14px 5px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.025);
+  border-left: 2px solid transparent;
+  animation: slide-in-right .18s ease;
   cursor: pointer;
-  transition: background var(--transition);
+  transition: background var(--transition), border-left-color .15s;
 }
-
-.tl-entry:hover { background: var(--bg-hover); }
-
+.tl-entry:hover {
+  background: var(--bg-hover);
+  border-left-color: var(--agent-color, var(--border));
+}
 .tl-entry.hidden { display: none; }
 
 .tl-time {
@@ -314,7 +306,15 @@
   color: var(--text-dim);
   flex-shrink: 0;
   padding-top: 2px;
-  width: 58px;
+  width: 56px;
+}
+
+.tl-type-icon {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding-top: 1px;
+  width: 14px;
+  text-align: center;
 }
 
 .tl-badge {
@@ -323,7 +323,7 @@
   border-radius: 10px;
   font-size: 10px;
   font-weight: 600;
-  background: var(--agent-color-dim, rgba(255,255,255,0.08));
+  background: var(--agent-color-dim, rgba(255,255,255,.08));
   color: var(--agent-color, var(--text-dim));
   white-space: nowrap;
 }
@@ -349,7 +349,6 @@
   max-height: 200px;
   overflow-y: auto;
 }
-
 .tl-entry.expanded .tl-detail { display: block; }
 
 /* Severity tags */

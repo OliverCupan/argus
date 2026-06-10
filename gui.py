@@ -64,7 +64,7 @@ async def _start(host: str, port: int, open_browser: bool) -> None:
     app       = create_app(gui, event_bus)
 
     url = f"http://{host}:{port}"
-    print(f"\n  Argus Web GUI  →  {url}\n  Press Ctrl+C to stop.\n")
+    print(f"\n  Argus Web GUI  ->  {url}\n  Press Ctrl+C to stop.\n")
 
     _browser_task = None
     if open_browser:

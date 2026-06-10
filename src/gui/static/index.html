@@ -9,7 +9,6 @@
   <link rel="stylesheet" href="/static/css/agents.css" />
   <link rel="stylesheet" href="/static/css/anims.css" />
 
-  <!-- marked.js for Markdown rendering (CDN, no build step) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
 </head>
 <body>
@@ -17,7 +16,6 @@
 <!-- ═══════════════════════════ TOP BAR ═══════════════════════════ -->
 <header class="topbar">
   <div class="topbar-eye">
-    <!-- Animated Argus Eye SVG -->
     <svg class="argus-eye" viewBox="0 0 80 50" xmlns="http://www.w3.org/2000/svg">
       <ellipse class="eye-outer" cx="40" cy="25" rx="36" ry="22" />
       <ellipse class="eye-iris"  cx="40" cy="25" rx="15" ry="15" />
@@ -30,25 +28,7 @@
     <span class="conn-badge" id="conn-count" title="Active connections">0</span>
   </div>
 
-  <div class="topbar-tokens" id="token-bar">
-    <div class="token-gauge">
-      <span class="token-label">Tokens</span>
-      <div class="gauge-track">
-        <div class="gauge-fill" id="token-fill" style="width:0%"></div>
-      </div>
-      <span class="token-value" id="token-value">0 / 500K</span>
-    </div>
-    <div class="token-gauge">
-      <span class="token-label">Cost</span>
-      <div class="gauge-track">
-        <div class="gauge-fill cost-fill" id="cost-fill" style="width:0%"></div>
-      </div>
-      <span class="token-value" id="cost-value">$0.0000 / $5.00</span>
-    </div>
-    <div class="task-delta" id="task-delta"></div>
-  </div>
-
-  <button class="icon-btn" id="settings-btn" title="Settings" aria-label="Settings">
+  <button class="icon-btn" id="settings-btn" title="Settings" aria-label="Settings" style="margin-left:auto">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <circle cx="12" cy="12" r="3"/>
       <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
@@ -56,15 +36,16 @@
   </button>
 </header>
 
-<!-- ══════════════════════════ AGENT GRID ═════════════════════════ -->
-<section class="agents-grid" id="agents-grid">
-  <!-- Cards injected by agents.js -->
+<!-- ══════════════════════ ORBITAL DOCK ═══════════════════════════ -->
+<section class="orbital-dock" id="agents-grid">
+  <!-- Orbit nodes injected by agents.js -->
 </section>
 
-<!-- ═════════════════════════ SHARED TIMELINE ════════════════════ -->
+<!-- ═════════════════════ SHARED TIMELINE ════════════════════════ -->
 <section class="timeline-section">
   <div class="timeline-header">
-    <span class="section-title">Activity</span>
+    <div class="live-dot"></div>
+    <span class="section-title">Activity Log</span>
     <div class="timeline-filters" id="timeline-filters">
       <button class="filter-btn active" data-filter="all">All</button>
       <button class="filter-btn" data-filter="tool_call">Tools</button>
@@ -74,7 +55,8 @@
     </div>
     <button class="icon-btn" id="clear-timeline-btn" title="Clear timeline">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/>
+        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+        <path d="M10 11v6M14 11v6M9 6V4h6v2"/>
       </svg>
     </button>
   </div>
@@ -82,6 +64,79 @@
     <div class="timeline-empty">Waiting for activity…</div>
   </div>
 </section>
+
+<!-- ══════════════════════ METRICS SIDEBAR ═══════════════════════ -->
+<aside class="metrics-sidebar">
+
+  <div class="ms-section open">
+    <div class="ms-section-header" onclick="this.parentElement.classList.toggle('open')">
+      <span class="ms-title">Budget</span>
+      <span class="ms-chevron">▲</span>
+    </div>
+    <div class="ms-body">
+      <div class="big-pair">
+        <div class="big-num">
+          <div class="big-num-lbl">Tokens</div>
+          <div class="big-num-val" id="tok-big" style="color:var(--accent)">0</div>
+          <div class="big-num-sub" id="tok-big-sub">/ 500K</div>
+        </div>
+        <div class="big-num">
+          <div class="big-num-lbl">Cost</div>
+          <div class="big-num-val" id="cost-big" style="color:var(--cyan)">$0.00</div>
+          <div class="big-num-sub" id="cost-big-sub">/ $5.00</div>
+        </div>
+      </div>
+      <div class="gauge-g">
+        <div class="gg-row"><span>Token usage</span><span id="token-value">0 / 500K</span></div>
+        <div class="g-track"><div class="g-fill g-tok" id="token-fill" style="width:0%"></div></div>
+      </div>
+      <div class="gauge-g">
+        <div class="gg-row"><span>Cost usage</span><span id="cost-value">$0.0000 / $5.00</span></div>
+        <div class="g-track"><div class="g-fill g-cost" id="cost-fill" style="width:0%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ms-section open">
+    <div class="ms-section-header" onclick="this.parentElement.classList.toggle('open')">
+      <span class="ms-title">Session</span>
+      <span class="ms-chevron">▲</span>
+    </div>
+    <div class="ms-body">
+      <div class="m-row"><span class="m-lbl">Total tokens</span><span class="m-val" id="stat-total-tok">—</span></div>
+      <div class="m-row"><span class="m-lbl">Cache write</span><span class="m-val" style="color:var(--cyan)" id="stat-cache-write">—</span></div>
+      <div class="m-row"><span class="m-lbl">Cache read</span><span class="m-val" style="color:var(--cyan)" id="stat-cache-read">—</span></div>
+      <div class="m-row"><span class="m-lbl">Total cost</span><span class="m-val" style="color:var(--green)" id="stat-total-cost">$0.0000</span></div>
+    </div>
+  </div>
+
+  <div class="ms-section open">
+    <div class="ms-section-header" onclick="this.parentElement.classList.toggle('open')">
+      <span class="ms-title">Current Task</span>
+      <span class="ms-chevron">▲</span>
+    </div>
+    <div class="ms-body">
+      <div class="m-row"><span class="m-lbl">Tokens Δ</span><span class="m-val" style="color:var(--yellow)" id="task-delta-tok">—</span></div>
+      <div class="m-row"><span class="m-lbl">Cost Δ</span><span class="m-val" style="color:var(--yellow)" id="task-delta-cost">—</span></div>
+      <div class="m-row"><span class="m-lbl">Duration</span><span class="m-val" id="task-dur">—</span></div>
+      <div class="m-row" id="task-delta" style="display:none">
+        <span class="m-lbl">Last task</span>
+        <span class="m-val" style="color:var(--dim)" id="task-delta-text">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="ms-section open">
+    <div class="ms-section-header" onclick="this.parentElement.classList.toggle('open')">
+      <span class="ms-title">Per-Agent</span>
+      <span class="ms-chevron">▲</span>
+    </div>
+    <div class="ms-body" id="sidebar-agents">
+      <!-- Populated by agents.js -->
+    </div>
+  </div>
+
+</aside>
 
 <!-- ══════════════════════════ INPUT AREA ════════════════════════ -->
 <footer class="input-area">
