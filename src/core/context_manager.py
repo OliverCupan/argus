@@ -270,6 +270,7 @@ class ContextManager:
             # Nothing could be dropped (all messages are high-importance) — return as-is
             return messages
 
+        dropped_msgs = [middle[i] for i in sorted(drop_idx)]
         remaining = [m for i, m in enumerate(middle) if i not in drop_idx]
 
         # Append trim notice to the first message's content rather than inserting a
@@ -280,7 +281,34 @@ class ContextManager:
 
         result = [first_msg] + remaining
         logger.debug("History trimmed: %d → %d messages", len(messages), len(result))
-        self._emit_compaction(kind="history_trim", messages_dropped=len(drop_idx), tokens_saved_est=0)
+
+        # Build compact previews of what was dropped for the UI before/after view
+        def _preview(msg: dict) -> str:
+            role = msg.get("role", "?")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # Tool result — extract text from first block
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        for inner in (block.get("content") or []):
+                            if isinstance(inner, dict) and inner.get("type") == "text":
+                                return f"[{role}] tool_result: {inner['text'][:120]}"
+                return f"[{role}] (tool result)"
+            return f"[{role}] {str(content)[:120]}"
+
+        before_lines = "\n".join(_preview(m) for m in dropped_msgs)
+        kept_lines   = "\n".join(
+            f"[{m.get('role','?')}] {str(m.get('content',''))[:80]}"
+            for m in ([first_msg] + remaining)[:8]
+        )
+
+        self._emit_compaction(
+            kind="history_trim",
+            messages_dropped=len(drop_idx),
+            tokens_saved_est=0,
+            before=before_lines[:2000],
+            after=kept_lines[:1000],
+        )
         return result
 
     # ------------------------------------------------------------------ #

@@ -145,9 +145,10 @@ function _buildCompactionRow(entry) {
   } else if (isHistoryTrim) {
     const n = d.messages_dropped || 0;
     bodyHTML =
-      `<div style="color:#a78bfa;font-weight:600;margin-bottom:8px">History trim executed</div>` +
-      `<p style="color:#c4b5fd;margin:0 0 6px"><strong style="color:#e2d9f3">${n} message${n !== 1 ? "s" : ""}</strong> dropped from the agent's conversation history.</p>` +
-      `<p style="color:#7c3aed;margin:0;font-style:italic">Older tool results and intermediate reasoning are removed. File edits and recent context are preserved.</p>`;
+      `<div style="color:#a78bfa;font-weight:600;margin-bottom:6px">BEFORE — ${n} message${n !== 1 ? "s" : ""} dropped from history</div>` +
+      `<pre style="color:#e2d9f3;white-space:pre-wrap;margin:0 0 14px">${_esc(d.before || "(no preview)")}</pre>` +
+      `<div style="color:#34d399;font-weight:600;margin-bottom:6px">AFTER — messages kept in context</div>` +
+      `<pre style="color:#a7f3d0;white-space:pre-wrap;margin:0">${_esc(d.after || "(no preview)")}</pre>`;
   }
 
   const body = document.createElement("div");
