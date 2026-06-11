@@ -12,12 +12,16 @@ import logging
 import os
 import re
 import sys
+from decimal import Decimal
 from pathlib import Path
 from typing import Optional
+
+import yaml
 
 from src.config import ArgusConfig, AGENT_NAMES
 from src.core.token_tracker import TokenTracker
 from src.core.pricing import ModelPricing
+from src.core.safety import SafetyChecker, SafetyLevel
 from src.agents.orchestrator import Orchestrator
 from src.gui.event_bus import EventBus
 
@@ -44,9 +48,11 @@ class GuiApp:
         config: ArgusConfig,
         pricing: Optional[ModelPricing],
         event_bus: EventBus,
+        config_path: Optional[Path] = None,
     ) -> None:
         self.config = config
         self.event_bus = event_bus
+        self._config_path = config_path
         self.tracker = TokenTracker(config.token_budget, pricing=pricing)
         self.pricing = pricing
 
@@ -144,6 +150,19 @@ class GuiApp:
             await self.event_bus.emit("orchestrator", "compaction", kind="manual_requested", messages_dropped=0, tokens_saved_est=0)
             return "_Compact requested — history will trim aggressively on next agent iteration._"
 
+        # Safety gate — block/review dangerous shell commands typed directly by user
+        _safety = SafetyChecker(self.config.safety)
+        _level  = _safety.classify_command(stripped)
+        if _level == SafetyLevel.BLOCKED:
+            return f"🚫 **BLOCKED** — command rejected by safety policy:\n\n```\n{stripped}\n```"
+        if _level == SafetyLevel.REVIEW:
+            return (
+                f"⚠️ **REVIEW REQUIRED** — this command needs approval before it can run:\n\n"
+                f"```\n{stripped}\n```\n\n"
+                f"If you intended this as a bash command, Argus cannot run it without confirmation. "
+                f"If this was meant as a task description, rephrase it."
+            )
+
         # Everything else → orchestrator (coding or audit)
         cwd = os.getcwd()
         augmented = f"[Working directory: {cwd}]\n\n{stripped}"
@@ -170,16 +189,50 @@ class GuiApp:
     def get_stats(self) -> dict:
         return self.tracker.get_summary()
 
+    @staticmethod
+    def _fmt_float(v: float) -> str:
+        """Return a plain decimal string with no scientific notation."""
+        s = format(Decimal(repr(v)), "f")
+        if "." in s:
+            s = s.rstrip("0").rstrip(".")
+        return s
+
     def get_config(self) -> dict:
         models = dataclasses.asdict(self.config.models)
         budget = dataclasses.asdict(self.config.token_budget)
+        # Send float values as plain decimal strings so the browser input
+        # never sees scientific notation (e.g. 1e-07 → "0.0000001")
+        for k, v in budget.items():
+            if isinstance(v, float):
+                budget[k] = self._fmt_float(v)
         return {"models": models, "budget": budget, "agents": _AGENT_NAMES}
 
     def _stats_markdown(self) -> str:
         s = self.tracker.get_summary()
+
+        agents      = {k: v for k, v in s["per_agent"].items() if "/_compaction" not in k}
+        compactions = {k: v for k, v in s["per_agent"].items() if "/_compaction" in k}
+
         lines = ["## Token Usage\n", "| Agent | Tokens | Cost | Calls |", "|---|---|---|---|"]
-        for name, d in s["per_agent"].items():
+        for name, d in agents.items():
             lines.append(f"| {name} | {d['tokens']:,} | ${d['cost']:.6f} | {d['calls']} |")
+
+        if compactions:
+            lines.append("\n### ⚡ Compaction calls (Haiku — proof it executed)\n")
+            lines.append("| Compacted | Tokens used | Cost | Calls |")
+            lines.append("|---|---|---|---|")
+            total_compact_tokens = 0
+            total_compact_cost   = 0.0
+            for name, d in compactions.items():
+                label = name.replace("/_compaction", "")
+                lines.append(f"| {label} | {d['tokens']:,} | ${d['cost']:.6f} | {d['calls']} |")
+                total_compact_tokens += d["tokens"]
+                total_compact_cost   += d["cost"]
+            lines.append(
+                f"\n_Haiku made **{sum(d['calls'] for d in compactions.values())} real API call(s)** "
+                f"consuming {total_compact_tokens:,} tokens (${total_compact_cost:.6f}) to summarize tool outputs._"
+            )
+
         lines.append(f"\n**Total:** {s['total_tokens']:,} tokens · ${s['total_cost_usd']:.4f} · {s['percent_used']}% of budget")
         return "\n".join(lines)
 
@@ -208,19 +261,38 @@ class GuiApp:
         lines.append("\nTo change: `model <agent> <model-name>`")
         return "\n".join(lines)
 
+    def _persist_config(self, section: str, key: str, value) -> None:
+        """Write a single key back to argus.yaml so changes survive restarts."""
+        if not self._config_path or not self._config_path.exists():
+            return
+        try:
+            with open(self._config_path) as f:
+                raw = yaml.safe_load(f) or {}
+            if section not in raw:
+                raw[section] = {}
+            raw[section][key] = value
+            with open(self._config_path, "w") as f:
+                yaml.dump(raw, f, default_flow_style=False, allow_unicode=True)
+        except Exception as exc:
+            logger.warning("Failed to persist config: %s", exc)
+
     def _handle_budget_set(self, field: str, value_str: str) -> str:
         if field not in _BUDGET_FIELDS:
             return f"Unknown budget field `{field}`. Valid: {', '.join(_BUDGET_FIELDS)}"
         try:
-            typ = int if field.startswith("total") else float
-            value = typ(value_str)
+            value = int(float(value_str)) if field.startswith("total") else float(value_str)
         except ValueError:
             return f"Invalid value `{value_str}` for `{field}`"
         ok = self.tracker.set_budget(field, value)
+        if ok:
+            setattr(self.config.token_budget, field, value)
+            self._persist_config("token_budget", field, value)
         return f"Budget `{field}` updated to `{value}`." if ok else f"Failed to update `{field}`."
 
     def _handle_model_set(self, agent: str, model_name: str) -> str:
         if agent not in _AGENT_NAMES:
             return f"Unknown agent `{agent}`. Valid: {', '.join(_AGENT_NAMES)}"
         ok = self.orchestrator.set_model(agent, model_name)
+        if ok:
+            self._persist_config("models", agent, model_name)
         return f"Model for `{agent}` updated to `{model_name}`." if ok else f"Failed to update `{agent}`."

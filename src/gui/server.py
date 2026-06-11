@@ -212,6 +212,8 @@ def create_app(gui: GuiApp, event_bus: EventBus) -> FastAPI:
     @app.post("/api/config/budget")
     async def set_budget(req: BudgetUpdateRequest) -> dict[str, Any]:
         result = gui._handle_budget_set(req.field, str(req.value))
+        if result.startswith(("Unknown", "Invalid", "Failed")):
+            raise HTTPException(status_code=400, detail=result)
         return {"result": result}
 
     @app.post("/api/compact")

@@ -15,6 +15,14 @@ function fmtTokens(n) {
 
 function fmtCost(n) { return "$" + n.toFixed(4); }
 
+// Format a dollar cap with enough decimal places to avoid showing $0.00 for small values
+function fmtCap(n) {
+  if (n <= 0)     return "disabled";
+  if (n < 0.01)   return n.toFixed(4);
+  if (n < 0.10)   return n.toFixed(3);
+  return n.toFixed(2);
+}
+
 function _set(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
@@ -48,13 +56,13 @@ function updateDashboard(summary) {
 
   // Gauge text
   _set("token-value", `${fmtTokens(total_tokens)} / ${fmtTokens(hard_cap)}`);
-  _set("cost-value",  `${fmtCost(total_cost_usd)} / $${dollar_hard_cap.toFixed(2)}`);
+  _set("cost-value",  `${fmtCost(total_cost_usd)} / $${fmtCap(dollar_hard_cap)}`);
 
   // Big numbers
   _set("tok-big",      fmtTokens(total_tokens));
   _set("tok-big-sub",  `/ ${fmtTokens(hard_cap)}`);
   _set("cost-big",     "$" + total_cost_usd.toFixed(2));
-  _set("cost-big-sub", `/ $${dollar_hard_cap.toFixed(2)}`);
+  _set("cost-big-sub", `/ $${fmtCap(dollar_hard_cap)}`);
 
   // ── Session stats ────────────────────────────────────────────
   _set("stat-total-tok",    fmtTokens(total_tokens));

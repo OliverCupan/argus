@@ -90,6 +90,7 @@ def test_average_valid(client):
         "/average",
         json={"numbers": [1, 2, 3, 4, 5]},
         content_type="application/json",
+        headers=AUTH,
     )
     assert response.status_code == 200
     data = response.get_json()
@@ -102,6 +103,7 @@ def test_average_empty_list(client):
         "/average",
         json={"numbers": []},
         content_type="application/json",
+        headers=AUTH,
     )
     assert response.status_code == 200
     data = response.get_json()
@@ -114,6 +116,7 @@ def test_average_floats(client):
         "/average",
         json={"numbers": [1.5, 2.5, 3.5]},
         content_type="application/json",
+        headers=AUTH,
     )
     assert response.status_code == 200
     data = response.get_json()
@@ -126,6 +129,7 @@ def test_average_mixed_int_float(client):
         "/average",
         json={"numbers": [1, 2.5, 4]},
         content_type="application/json",
+        headers=AUTH,
     )
     assert response.status_code == 200
     data = response.get_json()
@@ -138,6 +142,7 @@ def test_average_missing_numbers_key(client):
         "/average",
         json={"other": [1, 2, 3]},
         content_type="application/json",
+        headers=AUTH,
     )
     assert response.status_code == 400
     assert "Missing 'numbers' key" in response.get_json()["error"]
@@ -149,6 +154,7 @@ def test_average_invalid_json(client):
         "/average",
         data="not json",
         content_type="application/json",
+        headers=AUTH,
     )
     assert response.status_code == 400
 
@@ -159,6 +165,7 @@ def test_average_not_a_list(client):
         "/average",
         json={"numbers": "not a list"},
         content_type="application/json",
+        headers=AUTH,
     )
     assert response.status_code == 400
     assert "'numbers' must be a list" in response.get_json()["error"]
@@ -170,6 +177,7 @@ def test_average_contains_non_numeric(client):
         "/average",
         json={"numbers": [1, "two", 3]},
         content_type="application/json",
+        headers=AUTH,
     )
     assert response.status_code == 400
     assert "numeric" in response.get_json()["error"]
@@ -181,6 +189,7 @@ def test_average_contains_bool(client):
         "/average",
         json={"numbers": [1, True, 3]},
         content_type="application/json",
+        headers=AUTH,
     )
     assert response.status_code == 400
     assert "numeric" in response.get_json()["error"]
@@ -192,6 +201,7 @@ def test_average_single_value(client):
         "/average",
         json={"numbers": [42]},
         content_type="application/json",
+        headers=AUTH,
     )
     assert response.status_code == 200
     data = response.get_json()
