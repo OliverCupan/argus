@@ -1,72 +1,65 @@
-# Argus Configuration
-
-models:
-  orchestrator: claude-haiku-4-5-20251001
-  challenger: claude-sonnet-4-6
-  coder: claude-sonnet-4-6
-  explorer: claude-haiku-4-5-20251001
-  security_auditor: claude-haiku-4-5-20251001
-  bug_auditor: claude-haiku-4-5-20251001
-  performance_auditor: claude-haiku-4-5-20251001
-  test_auditor: claude-haiku-4-5-20251001
-
+agent:
+  bash_timeout: 30
+  max_dispatch_workers: 5
+  max_iterations: 15
+  max_iterations_per_agent:
+    challenger: 8
+    coder: 30
+    explorer: 12
+  parallel_audit: true
+  use_worktrees: false
+  worktree_dir: .argus/worktrees
 api:
-  provider: anthropic  # anthropic | openai
-  base_url: null       # override for custom endpoints
+  base_url: null
   max_retries: 3
+  provider: anthropic
   timeout: 60
-
+context:
+  compaction_model: claude-haiku-4-5-20251001
+  compaction_threshold: 500
+  max_context_injection_pct: 0.3
+  max_history_tokens: 50000
+models:
+  bug_auditor: claude-haiku-4-5-20251001
+  challenger: claude-haiku-4-5-20251001
+  coder: claude-haiku-4-5-20251001
+  explorer: claude-haiku-4-5-20251001
+  orchestrator: claude-haiku-4-5-20251001
+  performance_auditor: claude-haiku-4-5-20251001
+  security_auditor: claude-haiku-4-5-20251001
+  test_auditor: claude-haiku-4-5-20251001
+safety:
+  allowed_write_paths:
+  - .
+  blocked_commands:
+  - rm -rf /
+  - rm -rf ~
+  - sudo
+  - mkfs
+  - '> /dev/sda'
+  - chmod 777
+  - ':(){:|:&};:'
+  review_patterns:
+  - 'rm '
+  - pip install
+  - git push
+  - git reset --hard
+  - docker
+  - kill
+  - shutdown
 token_budget:
-  total_hard_cap: 500000     # tokens — kill agent immediately
-  total_soft_cap: 400000     # tokens — warn, let agent wind down gracefully
-  dollar_hard_cap: 5.00      # USD — kill immediately (set 0 to disable)
-  dollar_soft_cap: 4.00      # USD — warn (set 0 to disable)
-  warning_threshold: 0.8     # legacy 80% warning threshold
+  dollar_hard_cap: 5.0
+  dollar_soft_cap: 4.0
   per_agent:
-    orchestrator: 100000
+    bug_auditor: 50000
     challenger: 50000
     coder: 200000
     explorer: 100000
-    security_auditor: 50000
-    bug_auditor: 50000
+    orchestrator: 100000
     performance_auditor: 30000
+    security_auditor: 50000
     test_auditor: 30000
     worker: 30000
-
-context:
-  max_history_tokens: 50000
-  compaction_threshold: 3000        # Tier 1/2 boundary — outputs below this pass through
-  compaction_model: claude-haiku-4-5-20251001
-  max_context_injection_pct: 0.30   # max 30% of history budget for injected context
-
-safety:
-  blocked_commands:
-    - "rm -rf /"
-    - "rm -rf ~"
-    - "sudo"
-    - "mkfs"
-    - "> /dev/sda"
-    - "chmod 777"
-    - ":(){:|:&};:"
-  review_patterns:
-    - "rm "
-    - "pip install"
-    - "git push"
-    - "git reset --hard"
-    - "docker"
-    - "kill"
-    - "shutdown"
-  allowed_write_paths:
-    - "."  # project directory only
-
-agent:
-  max_iterations: 15          # default max ReAct loop iterations per agent
-  max_iterations_per_agent:
-    coder: 30                 # Coder needs more iterations for multi-file tasks
-    explorer: 12              # Explorer mostly does reads — 12 is enough
-    challenger: 8             # Challenger reviews, doesn't need many iterations
-  bash_timeout: 30            # seconds
-  parallel_audit: true        # run audit agents in parallel
-  max_dispatch_workers: 5
-  use_worktrees: false        # opt-in git worktree isolation for Coder
-  worktree_dir: .argus/worktrees
+  total_hard_cap: 500000
+  total_soft_cap: 400000
+  warning_threshold: 0.8

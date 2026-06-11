@@ -266,28 +266,38 @@ Peka på per-agent tokenantal i svaret och i måttstaveln.
 ```yaml
 context:
   max_history_tokens: 50000
-  compaction_threshold: 3000
+  compaction_threshold: 500
   compaction_model: claude-haiku-4-5-20251001
   max_context_injection_pct: 0.30
 ```
 
 > "Tre mekanismer skyddar kontextfönstret:
 >
-> 1. **Komprimering** — verktygsoutput över 3 000 tokens sammanfattas automatiskt av Haiku
+> 1. **Komprimering** — verktygsoutput över 500 tokens sammanfattas automatiskt av Haiku
 > 2. **Glidande historiefönster** — äldre meddelanden trimmas, filredigeringar prioriteras
 > 3. **Injektionstak** — kontext som skickas mellan agenter max 30 % av budgeten"
 
-Klicka på **⚡ Compact**-knappen i toppraden.
-
-Peka på det **lila märket** i aktivitetsloggen:
+Peka på de **lila märkena** i aktivitetsloggen från STEG 5-körningen:
 
 ```
-⚡ Context compacted · manual trigger
+⚡ Tool output compacted (tier 1)
 ```
 
-> "Komprimering sker automatiskt, men kan också triggas manuellt."
+Kör sedan `stats` igen och peka på den **andra tabellen**:
 
-**VG.2 ✓** — konkret mekanism demonstrerad, tröskel och triggning visad
+```
+### ⚡ Compaction calls (Haiku — proof it executed)
+| Compacted | Tokens used | Cost | Calls |
+```
+
+> "Det här är Haikus räkning — ett riktigt API-anrop med verklig kostnad.
+> Det går inte att fejka. Haiku läste verktygsoutputen och skrev en sammanfattning."
+
+Klicka på **⚡ Compact**-knappen i toppraden för manuell triggning.
+
+> "Komprimering sker automatiskt vid varje stort verktygsanrop, men kan också triggas manuellt."
+
+**VG.2 ✓** — konkret mekanism demonstrerad med verklig Haiku-kostnad som bevis
 
 ---
 
