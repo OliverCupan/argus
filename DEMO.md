@@ -280,8 +280,12 @@ context:
 Peka på de **lila märkena** i aktivitetsloggen från STEG 5-körningen:
 
 ```
-⚡ Tool output compacted (tier 1)
+⚡ Context compacted · tool output tier-1 · ~3 400 tokens saved
 ```
+
+> "Det här talet — 'tokens saved' — är direkt bevis att komprimering fungerade.
+> Utan komprimering hade de tokensen legat kvar i agentens historik och tagit upp
+> kontextfönstret. Nu är de ersatta med en kort sammanfattning."
 
 Kör sedan `stats` igen och peka på den **andra tabellen**:
 
@@ -290,8 +294,8 @@ Kör sedan `stats` igen och peka på den **andra tabellen**:
 | Compacted | Tokens used | Cost | Calls |
 ```
 
-> "Det här är Haikus räkning — ett riktigt API-anrop med verklig kostnad.
-> Det går inte att fejka. Haiku läste verktygsoutputen och skrev en sammanfattning."
+> "Haiku-raden visar att ett riktigt API-anrop gjordes för att producera sammanfattningen.
+> 'Tokens saved' i aktivitetsloggen = kontexten krympte. Haiku-kostnaden = det hände på riktigt."
 
 Klicka på **⚡ Compact**-knappen i toppraden för manuell triggning.
 
