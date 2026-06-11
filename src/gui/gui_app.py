@@ -146,8 +146,7 @@ class GuiApp:
             return await self.orchestrator.fix_finding(int(m.group(1)))
 
         if cmd == "compact":
-            self.orchestrator.request_compact()
-            await self.event_bus.emit("orchestrator", "compaction", kind="manual_requested", messages_dropped=0, tokens_saved_est=0)
+            self.orchestrator.request_compact()  # emits one consolidated event internally
             return "_Compact requested — history will trim aggressively on next agent iteration._"
 
         # Safety gate — block/review dangerous shell commands typed directly by user

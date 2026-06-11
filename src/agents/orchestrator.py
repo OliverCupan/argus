@@ -105,9 +105,28 @@ class Orchestrator:
         await self._worktrees.cleanup_all()
 
     def request_compact(self) -> None:
-        """Request an aggressive history trim on all active agents."""
-        for agent in [self.explorer, self.challenger, self.coder] + self.auditors:
+        """Trim all agent histories, emit ONE consolidated before/after event."""
+        agents = [self.explorer, self.challenger, self.coder] + self.auditors
+        before_parts: list[str] = []
+        after_parts:  list[str] = []
+        total_dropped = 0
+
+        for agent in agents:
+            before, after, dropped = agent.get_history_preview()
+            if before:
+                before_parts.append(f"── {agent.name} ──\n{before}")
+                after_parts.append(f"── {agent.name} ──\n{after}")
+                total_dropped += dropped
             agent.request_compact()
+
+        if self._event_bus:
+            self._event_bus.emit_sync(
+                "orchestrator", "compaction",
+                kind="manual",
+                messages_dropped=total_dropped,
+                before="\n\n".join(before_parts)[:2000] if before_parts else "",
+                after="\n\n".join(after_parts)[:1000]  if after_parts  else "",
+            )
 
     def set_model(self, agent_name: str, model: str) -> bool:
         """Update an agent's model at runtime. Returns True on success."""

@@ -218,8 +218,7 @@ def create_app(gui: GuiApp, event_bus: EventBus) -> FastAPI:
 
     @app.post("/api/compact")
     async def compact_context() -> dict[str, Any]:
-        gui.orchestrator.request_compact()
-        await event_bus.emit("orchestrator", "compaction", kind="manual_requested", messages_dropped=0, tokens_saved_est=0)
+        gui.orchestrator.request_compact()  # emits one consolidated event internally
         return {"ok": True, "message": "Compact requested"}
 
     return app

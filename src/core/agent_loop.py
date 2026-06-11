@@ -78,43 +78,47 @@ class BaseAgent:
         self._last_messages: list[dict] = []  # snapshot of last run's final history
 
     def request_compact(self) -> None:
+        """Set the flag so the next live run trims aggressively."""
+        self._compact_requested.set()
+
+    def get_history_preview(self) -> tuple[str, str, int]:
         """
-        Trim the persisted message history immediately and emit before/after,
-        then set the flag so the next live run also trims aggressively.
+        Trim _last_messages and return (before_text, after_text, dropped).
+        Does NOT emit any events — caller handles that.
+        Returns ("", "", 0) if no history is available.
         """
-        if self._last_messages:
-            before_msgs = self._last_messages
+        if not self._last_messages:
+            return "", "", 0
+
+        def _preview(msg: dict) -> str:
+            role = msg.get("role", "?")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        for inner in (block.get("content") or []):
+                            if isinstance(inner, dict) and inner.get("type") == "text":
+                                return f"[{role}] tool_result: {inner['text'][:120]}"
+                return f"[{role}] (tool result)"
+            return f"[{role}] {str(content)[:120]}"
+
+        before_msgs = list(self._last_messages)
+        # Use context manager's trim logic but suppress its emit by temporarily removing emit_fn
+        orig_emit = self.context._emit_fn
+        self.context._emit_fn = None
+        try:
             trimmed = self.context.trim_history(
                 list(before_msgs),
                 max_tokens=self.config.context.max_history_tokens // 2,
             )
-            self._last_messages = trimmed
+        finally:
+            self.context._emit_fn = orig_emit
+        self._last_messages = trimmed
 
-            def _preview(msg: dict) -> str:
-                role = msg.get("role", "?")
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, dict) and block.get("type") == "tool_result":
-                            for inner in (block.get("content") or []):
-                                if isinstance(inner, dict) and inner.get("type") == "text":
-                                    return f"[{role}] tool_result: {inner['text'][:120]}"
-                    return f"[{role}] (tool result)"
-                return f"[{role}] {str(content)[:120]}"
-
-            dropped = len(before_msgs) - len(trimmed)
-            before_text = "\n".join(_preview(m) for m in before_msgs[:20])
-            after_text  = "\n".join(_preview(m) for m in trimmed[:20])
-            self._emit_sync_compaction(
-                "compaction",
-                kind="manual",
-                messages_dropped=dropped,
-                before=before_text[:2000],
-                after=after_text[:1000],
-            )
-        else:
-            self._emit_sync_compaction("compaction", kind="manual", messages_dropped=0, before="", after="")
-        self._compact_requested.set()
+        dropped = len(before_msgs) - len(trimmed)
+        before_text = "\n".join(_preview(m) for m in before_msgs)
+        after_text  = "\n".join(_preview(m) for m in trimmed)
+        return before_text[:2000], after_text[:1000], dropped
 
     def _emit_sync_compaction(self, event_type: str, **data) -> None:
         """Sync bridge: fires compaction event onto EventBus without awaiting."""
@@ -364,7 +368,6 @@ class BaseAgent:
                     messages,
                     max_tokens=self.config.context.max_history_tokens // 2,
                 )
-                await self._emit("compaction", kind="manual", messages_dropped=0, tokens_saved_est=0)
 
         # Max iterations exhausted
         logger.warning("[%s] Max iterations (%d) reached", self.name, _max_iters)
