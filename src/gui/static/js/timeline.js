@@ -93,19 +93,22 @@ function _buildBudgetRow(entry) {
 
 function _buildCompactionRow(entry) {
   const d = entry.data || {};
-  const hasDiff = d.kind === "tool_output" && (d.before || d.after);
+  const isToolOutput = d.kind === "tool_output" && (d.before || d.after);
+  const isManual     = d.kind === "manual" || d.kind === "manual_requested";
+  const isHistoryTrim = d.kind === "history_trim";
+  const hasDetail = isToolOutput || isManual || isHistoryTrim;
 
   let label = "⚡ Context compacted";
   if (d.kind === "tool_output") {
     label += ` · tool output tier-${d.tier}`;
     if (d.tokens_saved_est > 0) label += ` · ~${d.tokens_saved_est.toLocaleString()} tokens saved`;
-  } else if (d.kind === "history_trim") {
+  } else if (isHistoryTrim) {
     label += ` · history trim`;
     if (d.messages_dropped > 0) label += ` · ${d.messages_dropped} messages dropped`;
-  } else if (d.kind === "manual" || d.kind === "manual_requested") {
+  } else if (isManual) {
     label += ` · manual trigger`;
   }
-  if (hasDiff) label += ` — click to expand`;
+  if (hasDetail) label += ` — click to expand`;
 
   const row = document.createElement("div");
   row.className = "tl-compact-badge";
@@ -117,41 +120,54 @@ function _buildCompactionRow(entry) {
     "background:#1e0d3a", "border-top:1px solid #4c1d95",
     "border-bottom:1px solid #4c1d95", "border-radius:4px",
     "font-size:11px", "color:#c084fc", "letter-spacing:0.3px",
-    "font-style:italic",
-    hasDiff ? "cursor:pointer" : ""
+    "font-style:italic", "cursor:pointer"
   ].join(";");
 
   row.innerHTML = `<div class="tl-compact-header" style="${headerStyle}">
     <span style="opacity:0.9">${_esc(label)}</span>
-    ${hasDiff ? `<span class="tl-compact-chevron" style="margin-left:8px;font-style:normal;font-size:10px">▼</span>` : ""}
+    <span class="tl-compact-chevron" style="margin-left:8px;font-style:normal;font-size:10px">▼</span>
   </div>`;
 
-  if (hasDiff) {
-    const body = document.createElement("div");
-    body.className = "tl-compact-body";
-    body.style.cssText = [
-      "display:none",
-      "background:#120822", "border:1px solid #4c1d95", "border-top:none",
-      "border-radius:0 0 4px 4px", "padding:10px 14px",
-      "font-size:11px", "font-family:var(--font-mono,monospace)",
-      "overflow-x:auto"
-    ].join(";");
-
-    body.innerHTML =
-      `<div style="color:#a78bfa;font-weight:600;margin-bottom:6px">BEFORE — raw tool output</div>` +
+  // Build body content based on kind
+  let bodyHTML = "";
+  if (isToolOutput) {
+    bodyHTML =
+      `<div style="color:#a78bfa;font-weight:600;margin-bottom:6px">BEFORE — raw tool output sent to Haiku</div>` +
       `<pre style="color:#e2d9f3;white-space:pre-wrap;margin:0 0 14px">${_esc(d.before || "")}</pre>` +
-      `<div style="color:#34d399;font-weight:600;margin-bottom:6px">AFTER — Haiku summary</div>` +
+      `<div style="color:#34d399;font-weight:600;margin-bottom:6px">AFTER — Haiku summary stored in context</div>` +
       `<pre style="color:#a7f3d0;white-space:pre-wrap;margin:0">${_esc(d.after || "")}</pre>`;
-
-    row.appendChild(body);
-
-    row.querySelector(".tl-compact-header").addEventListener("click", () => {
-      const open = body.style.display !== "none";
-      body.style.display = open ? "none" : "block";
-      const chev = row.querySelector(".tl-compact-chevron");
-      if (chev) chev.textContent = open ? "▼" : "▲";
-    });
+  } else if (isManual) {
+    bodyHTML =
+      `<div style="color:#a78bfa;font-weight:600;margin-bottom:8px">Manual compact triggered</div>` +
+      `<p style="color:#c4b5fd;margin:0 0 6px">The compact flag has been set on all active agents.</p>` +
+      `<p style="color:#c4b5fd;margin:0 0 6px">On the next agent iteration, the message history will be trimmed aggressively — older messages are dropped, keeping only the most recent exchanges and any file edits.</p>` +
+      `<p style="color:#7c3aed;margin:0;font-style:italic">This reduces context size without an LLM call. Tool-output compaction (tier badges) uses Haiku to summarize.</p>`;
+  } else if (isHistoryTrim) {
+    const n = d.messages_dropped || 0;
+    bodyHTML =
+      `<div style="color:#a78bfa;font-weight:600;margin-bottom:8px">History trim executed</div>` +
+      `<p style="color:#c4b5fd;margin:0 0 6px"><strong style="color:#e2d9f3">${n} message${n !== 1 ? "s" : ""}</strong> dropped from the agent's conversation history.</p>` +
+      `<p style="color:#7c3aed;margin:0;font-style:italic">Older tool results and intermediate reasoning are removed. File edits and recent context are preserved.</p>`;
   }
+
+  const body = document.createElement("div");
+  body.className = "tl-compact-body";
+  body.style.cssText = [
+    "display:none",
+    "background:#120822", "border:1px solid #4c1d95", "border-top:none",
+    "border-radius:0 0 4px 4px", "padding:10px 14px",
+    "font-size:11px", "font-family:var(--font-mono,monospace)",
+    "overflow-x:auto", "line-height:1.5"
+  ].join(";");
+  body.innerHTML = bodyHTML;
+  row.appendChild(body);
+
+  row.querySelector(".tl-compact-header").addEventListener("click", () => {
+    const open = body.style.display !== "none";
+    body.style.display = open ? "none" : "block";
+    const chev = row.querySelector(".tl-compact-chevron");
+    if (chev) chev.textContent = open ? "▼" : "▲";
+  });
 
   return row;
 }
