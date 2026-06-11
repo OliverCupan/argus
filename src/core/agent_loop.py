@@ -75,9 +75,45 @@ class BaseAgent:
         self._event_bus = event_bus
         self._compact_requested = asyncio.Event()
         self.context = ContextManager(config.context, emit_fn=self._emit_sync_compaction)
+        self._last_messages: list[dict] = []  # snapshot of last run's final history
 
     def request_compact(self) -> None:
-        """Signal the run loop to perform an aggressive history trim next iteration."""
+        """
+        Trim the persisted message history immediately and emit before/after,
+        then set the flag so the next live run also trims aggressively.
+        """
+        if self._last_messages:
+            before_msgs = self._last_messages
+            trimmed = self.context.trim_history(
+                list(before_msgs),
+                max_tokens=self.config.context.max_history_tokens // 2,
+            )
+            self._last_messages = trimmed
+
+            def _preview(msg: dict) -> str:
+                role = msg.get("role", "?")
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "tool_result":
+                            for inner in (block.get("content") or []):
+                                if isinstance(inner, dict) and inner.get("type") == "text":
+                                    return f"[{role}] tool_result: {inner['text'][:120]}"
+                    return f"[{role}] (tool result)"
+                return f"[{role}] {str(content)[:120]}"
+
+            dropped = len(before_msgs) - len(trimmed)
+            before_text = "\n".join(_preview(m) for m in before_msgs[:20])
+            after_text  = "\n".join(_preview(m) for m in trimmed[:20])
+            self._emit_sync_compaction(
+                "compaction",
+                kind="manual",
+                messages_dropped=dropped,
+                before=before_text[:2000],
+                after=after_text[:1000],
+            )
+        else:
+            self._emit_sync_compaction("compaction", kind="manual", messages_dropped=0, before="", after="")
         self._compact_requested.set()
 
     def _emit_sync_compaction(self, event_type: str, **data) -> None:
@@ -161,6 +197,7 @@ class BaseAgent:
 
         async def _finish(content: str, tokens_in: int, tokens_out: int, iterations: int) -> AgentResult:
             """Emit agent_finished + live token_update, then return AgentResult."""
+            self._last_messages = list(messages)  # snapshot for compact before/after
             await self._emit("agent_finished", content=content, tokens_in=tokens_in,
                              tokens_out=tokens_out, iterations=iterations)
             if self._event_bus is not None:
@@ -184,6 +221,7 @@ class BaseAgent:
             # --- Budget checks ---
             if self.tracker.is_hard_cap_reached():
                 logger.warning("[%s] Hard cap reached", self.name)
+                await self._emit("budget_exceeded", reason="hard_cap")
                 _content = _partial_or_bracket("[Budget hard limit reached — agent stopped]")
                 return await _finish(_content, total_in, total_out, iteration)
 
@@ -191,11 +229,13 @@ class BaseAgent:
                 _soft_iters_left -= 1
                 if _soft_iters_left <= 0:
                     logger.warning("[%s] Soft cap escalated to hard stop after wind-down", self.name)
+                    await self._emit("budget_exceeded", reason="soft_cap")
                     _content = _partial_or_bracket("[Budget soft limit exceeded — agent wound down]")
                     return await _finish(_content, total_in, total_out, iteration)
 
             if self.tracker.is_agent_cap_reached(self.name):
                 logger.warning("[%s] Per-agent token cap reached", self.name)
+                await self._emit("budget_exceeded", reason="per_agent_cap")
                 _content = _partial_or_bracket(f"[Per-agent budget exceeded for {self.name}]")
                 return await _finish(_content, total_in, total_out, iteration)
 
@@ -328,6 +368,7 @@ class BaseAgent:
 
         # Max iterations exhausted
         logger.warning("[%s] Max iterations (%d) reached", self.name, _max_iters)
+        await self._emit("budget_exceeded", reason="max_iterations")
         _content = _partial_or_bracket(
             f"[Max iterations ({_max_iters}) reached — agent stopped]"
         )

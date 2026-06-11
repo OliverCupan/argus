@@ -137,11 +137,18 @@ function _buildCompactionRow(entry) {
       `<div style="color:#34d399;font-weight:600;margin-bottom:6px">AFTER — Haiku summary stored in context</div>` +
       `<pre style="color:#a7f3d0;white-space:pre-wrap;margin:0">${_esc(d.after || "")}</pre>`;
   } else if (isManual) {
-    bodyHTML =
-      `<div style="color:#a78bfa;font-weight:600;margin-bottom:8px">Manual compact triggered</div>` +
-      `<p style="color:#c4b5fd;margin:0 0 6px">The compact flag has been set on all active agents.</p>` +
-      `<p style="color:#c4b5fd;margin:0 0 6px">On the next agent iteration, the message history will be trimmed aggressively — older messages are dropped, keeping only the most recent exchanges and any file edits.</p>` +
-      `<p style="color:#7c3aed;margin:0;font-style:italic">This reduces context size without an LLM call. Tool-output compaction (tier badges) uses Haiku to summarize.</p>`;
+    if (d.before || d.after) {
+      const n = d.messages_dropped || 0;
+      bodyHTML =
+        `<div style="color:#a78bfa;font-weight:600;margin-bottom:6px">BEFORE — ${n} message${n !== 1 ? "s" : ""} trimmed from history</div>` +
+        `<pre style="color:#e2d9f3;white-space:pre-wrap;margin:0 0 14px">${_esc(d.before || "")}</pre>` +
+        `<div style="color:#34d399;font-weight:600;margin-bottom:6px">AFTER — messages kept in context</div>` +
+        `<pre style="color:#a7f3d0;white-space:pre-wrap;margin:0">${_esc(d.after || "")}</pre>`;
+    } else {
+      bodyHTML =
+        `<div style="color:#a78bfa;font-weight:600;margin-bottom:8px">Manual compact — no history to trim yet</div>` +
+        `<p style="color:#c4b5fd;margin:0">Run a task first, then click Compact to see before/after.</p>`;
+    }
   } else if (isHistoryTrim) {
     const n = d.messages_dropped || 0;
     bodyHTML =
