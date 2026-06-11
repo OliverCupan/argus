@@ -465,6 +465,56 @@ body {
 /* ── Settings panel ─────────────────────────────────────────── */
 .settings-card { max-width: 680px; max-height: 80vh; overflow-y: auto; }
 
+/* ── Result panel ───────────────────────────────────────────── */
+.result-panel {
+  max-height: 55vh;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0;
+  position: relative;
+  margin: 8px 12px;
+  flex-shrink: 0;
+}
+
+.result-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.result-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.result-panel-body {
+  padding: 16px;
+}
+
+.result-close-btn {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 16px;
+  background: none;
+  border: none;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.result-close-btn:hover { color: var(--text); background: var(--bg-hover, rgba(255,255,255,0.06)); }
+
 /* ── Markdown render ────────────────────────────────────────── */
 .md-render { line-height: 1.6; }
 .md-render h1,.md-render h2,.md-render h3 { margin: 12px 0 6px; color: var(--text-bright); }

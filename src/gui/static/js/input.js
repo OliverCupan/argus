@@ -79,6 +79,15 @@ function initInput() {
     }
   });
 
+  function _unblockInput() {
+    _busy = false;
+    sendBtn.disabled = false;
+  }
+
+  // Expose unblock so external callers (e.g. WebSocket task_complete handler) can
+  // unlock the input immediately without waiting for the HTTP fetch to settle.
+  window.ArgusInput.unblock = _unblockInput;
+
   sendBtn.addEventListener("click", _doSend);
 
   async function _doSend() {
@@ -114,8 +123,7 @@ function initInput() {
     } catch (err) {
       _displayResult(`**Error:** ${err.message}`);
     } finally {
-      _busy = false;
-      sendBtn.disabled = false;
+      _unblockInput();
       window.ArgusDashboard?.taskEnd();
     }
   }
@@ -127,15 +135,37 @@ function initInput() {
       panel = document.createElement("div");
       panel.id = "result-panel";
       panel.className = "result-panel";
-      document.querySelector(".timeline-section")
-        ?.insertAdjacentElement("beforebegin", panel);
+      // Must go inside the timeline-section so it sits in the correct grid area
+      const feed = document.getElementById("timeline-feed");
+      if (feed) feed.parentElement.insertBefore(panel, feed);
+      else document.querySelector(".timeline-section")?.prepend(panel);
     }
-    if (window.marked) {
-      panel.innerHTML = `<div class="md-render">${window.marked.parse(markdown)}</div>`;
-    } else {
-      panel.innerHTML = `<pre style="white-space:pre-wrap">${markdown}</pre>`;
-    }
+    const close = () => { panel.style.display = "none"; };
+    // Ensure panel is visible when new result arrives
+    panel.style.display = "";
+    const content = window.marked
+      ? `<div class="md-render">${window.marked.parse(markdown)}</div>`
+      : `<pre style="white-space:pre-wrap">${markdown}</pre>`;
+    panel.innerHTML =
+      `<div class="result-panel-header">` +
+        `<span class="result-panel-title">Result</span>` +
+        `<button class="result-close-btn" aria-label="Close" title="Close (Esc)">&times;</button>` +
+      `</div>` +
+      `<div class="result-panel-body">${content}</div>`;
+    panel.querySelector(".result-close-btn").addEventListener("click", close);
+    // Scroll to top of panel on new result
+    panel.scrollTop = 0;
     panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    // Escape key closes the panel while it is visible
+    function _onKey(e) {
+      if (e.key === "Escape" && panel.style.display !== "none") {
+        close();
+        document.removeEventListener("keydown", _onKey);
+      }
+    }
+    document.removeEventListener("keydown", _onKey); // clear any stale listener
+    document.addEventListener("keydown", _onKey);
   }
 }
 
