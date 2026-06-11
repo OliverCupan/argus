@@ -70,14 +70,16 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### Run with Docker
+### Run with Docker (Web GUI)
 
 ```bash
-# Point at any project directory and go
+# Starts the web interface at http://localhost:7777
 cp .env.example .env
 # Add ANTHROPIC_API_KEY to .env
 
+# Point at any project directory
 PROJECT_PATH=/path/to/your/project docker compose up
+# Then open http://localhost:7777 in your browser
 ```
 
 ---
@@ -102,6 +104,10 @@ argus > exit
 | `audit <path>` | Audit a directory: parallel Security/Bug/Perf/Test scan |
 | `fix <id>` | Fix a specific finding from the last audit (e.g. `fix 3`) |
 | `stats` | Show per-agent token usage and USD cost |
+| `budget` | Show token/USD caps and current usage |
+| `budget set <field> <value>` | Adjust a cap live (e.g. `budget set dollar_hard_cap 10`) |
+| `model` | Show which model each agent is using |
+| `model <agent> <name>` | Switch an agent's model live (e.g. `model coder claude-opus-4-8`) |
 | `exit` | Quit |
 
 ### Safety
@@ -135,25 +141,6 @@ safety:
   review_patterns: ["pip install", "git push", ...]
   allowed_write_paths: ["."]  # agents can only write inside project dir
 ```
-
----
-
-## Demo
-
-The `demo/buggy_app/` directory contains a small Flask app with 5 planted bugs:
-
-1. Hardcoded API key in source
-2. SQL injection vulnerability
-3. O(n²) nested loop
-4. Unhandled `None` / missing key
-5. Failing test
-
-```bash
-python main.py
-argus > audit demo/buggy_app
-```
-
-Argus should find all 5 issues, rank them by severity (CRITICAL → LOW), and let you fix them one by one with `fix <id>`.
 
 ---
 
