@@ -11,6 +11,7 @@ Serves the static single-page dashboard and provides:
   GET  /api/config     → models + budget
   POST /api/config/model  → {agent, model}
   POST /api/config/budget → {field, value}
+  POST /api/compact       → force aggressive history trim on all agents
 """
 
 import asyncio
