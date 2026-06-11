@@ -8,5 +8,11 @@ dist/
 *.egg-info/
 .mypy_cache/
 .pytest_cache/
-thoughts/personal/
+thoughts/
 DEMO.md
+PLAN.md
+.argus/
+demo/buggy_app/AUDIT_REPORT.md
+output/
+.claude/
+CLAUDE.md
