@@ -104,6 +104,11 @@ class Orchestrator:
         await self.llm.close()
         await self._worktrees.cleanup_all()
 
+    def request_compact(self) -> None:
+        """Request an aggressive history trim on all active agents."""
+        for agent in [self.explorer, self.challenger, self.coder] + self.auditors:
+            agent.request_compact()
+
     def set_model(self, agent_name: str, model: str) -> bool:
         """Update an agent's model at runtime. Returns True on success."""
         if not hasattr(self.config.models, agent_name):

@@ -139,6 +139,11 @@ class GuiApp:
         if m:
             return await self.orchestrator.fix_finding(int(m.group(1)))
 
+        if cmd == "compact":
+            self.orchestrator.request_compact()
+            await self.event_bus.emit("orchestrator", "compaction", kind="manual_requested", messages_dropped=0, tokens_saved_est=0)
+            return "_Compact requested — history will trim aggressively on next agent iteration._"
+
         # Everything else → orchestrator (coding or audit)
         cwd = os.getcwd()
         augmented = f"[Working directory: {cwd}]\n\n{stripped}"

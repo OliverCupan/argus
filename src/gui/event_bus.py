@@ -37,6 +37,7 @@ TOKEN_UPDATE       = "token_update"
 CONFIRM_REQUIRED   = "confirm_required"
 TASK_COMPLETE      = "task_complete"
 CONNECTIONS_UPDATE = "connections_update"
+COMPACTION       = "compaction"
 
 
 @dataclass

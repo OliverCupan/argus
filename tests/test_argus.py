@@ -460,6 +460,106 @@ class TestContextManager:
         # All messages should be preserved (nothing can be dropped without violating score 80)
         assert len(result) == len(msgs)
 
+    @pytest.mark.asyncio
+    async def test_emit_fn_not_called_for_tier1(self):
+        from src.core.context_manager import ContextManager
+        from src.config import ContextConfig
+        import unittest.mock as mock
+
+        emit_calls = []
+        def capture_emit(event_type, **data):
+            emit_calls.append((event_type, data))
+
+        cm = ContextManager(
+            ContextConfig(compaction_threshold=10_000, compaction_model="x"),
+            emit_fn=capture_emit,
+        )
+        llm = mock.AsyncMock()
+        result = await cm.maybe_compact("short text", llm)
+        # Tier 1: no compaction, emit_fn must NOT be called
+        assert emit_calls == []
+        assert result == "short text"
+
+    @pytest.mark.asyncio
+    async def test_emit_fn_called_for_tier2(self):
+        from src.core.context_manager import ContextManager
+        from src.config import ContextConfig
+        import unittest.mock as mock
+
+        emit_calls = []
+        def capture_emit(event_type, **data):
+            emit_calls.append((event_type, data))
+
+        cm = ContextManager(
+            ContextConfig(compaction_threshold=1, compaction_model="claude-haiku-4-5-20251001"),
+            emit_fn=capture_emit,
+        )
+
+        # Mock LLM response
+        fake_resp = mock.MagicMock()
+        fake_resp.content = "bullet summary"
+        fake_resp.input_tokens = 10
+        fake_resp.output_tokens = 5
+        llm = mock.AsyncMock()
+        llm.chat = mock.AsyncMock(return_value=fake_resp)
+
+        # Text that is above threshold (1 token) but below Tier 3 threshold (5000 tokens)
+        # ~200 chars = ~50 tokens, above threshold=1, below TIER2=5000
+        text = "x" * 200
+        result = await cm.maybe_compact(text, llm)
+
+        assert len(emit_calls) == 1
+        event_type, data = emit_calls[0]
+        assert event_type == "compaction"
+        assert data["kind"] == "tool_output"
+        assert data["tier"] == 2
+        assert "tokens_saved_est" in data
+
+    def test_emit_fn_called_for_history_trim(self):
+        from src.core.context_manager import ContextManager
+        from src.config import ContextConfig
+
+        emit_calls = []
+        def capture_emit(event_type, **data):
+            emit_calls.append((event_type, data))
+
+        cm = ContextManager(
+            ContextConfig(max_history_tokens=5, compaction_threshold=500, compaction_model="x"),
+            emit_fn=capture_emit,
+        )
+        msgs = [
+            {"role": "user", "content": "task"},
+            {"role": "assistant", "content": "thinking " * 50},   # score 30, droppable
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "r"}]},
+            {"role": "assistant", "content": "done"},              # score 100, kept
+        ]
+        result = cm.trim_history(msgs, max_tokens=5)
+
+        assert len(emit_calls) == 1
+        event_type, data = emit_calls[0]
+        assert event_type == "compaction"
+        assert data["kind"] == "history_trim"
+        assert data["messages_dropped"] > 0
+
+    def test_emit_fn_not_called_when_trim_noop(self):
+        from src.core.context_manager import ContextManager
+        from src.config import ContextConfig
+
+        emit_calls = []
+        def capture_emit(event_type, **data):
+            emit_calls.append((event_type, data))
+
+        cm = ContextManager(
+            ContextConfig(max_history_tokens=50_000, compaction_threshold=500, compaction_model="x"),
+            emit_fn=capture_emit,
+        )
+        msgs = [
+            {"role": "user", "content": "task"},
+            {"role": "assistant", "content": "done"},
+        ]
+        result = cm.trim_history(msgs)
+        assert emit_calls == []  # No trimming occurred, no emit
+
 
 @pytest.mark.unit
 class TestFileLock:

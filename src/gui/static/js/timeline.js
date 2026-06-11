@@ -38,6 +38,7 @@ function _eventLabel(type, data) {
     case "token_update":     return `≡ token update`;
     case "confirm_required": return `⚠ <span class="tag-error">review required</span>: ${_esc(data.command || "").slice(0, 80)}`;
     case "task_complete":    return `<span class="tag-done">★ task complete</span>`;
+    case "compaction":       return `⚡ compacted`;
     default:                 return _esc(type);
   }
 }
@@ -65,7 +66,41 @@ function _isVisible(entry) {
   return _filterCategory(entry.event_type) === _activeFilter;
 }
 
+function _buildCompactionRow(entry) {
+  const row = document.createElement("div");
+  row.className = "tl-compact-badge";
+  row.dataset.eventType = "compaction";
+  row.style.cssText = [
+    "display:flex", "align-items:center", "justify-content:center",
+    "padding:6px 16px", "margin:4px 0",
+    "background:#1e0d3a", "border-top:1px solid #4c1d95",
+    "border-bottom:1px solid #4c1d95", "border-radius:4px",
+    "font-size:11px", "color:#c084fc", "letter-spacing:0.3px",
+    "font-style:italic"
+  ].join(";");
+
+  const d = entry.data || {};
+  let label = "⚡ Context compacted";
+  if (d.kind === "tool_output") {
+    label += ` · tool output tier-${d.tier}`;
+    if (d.tokens_saved_est > 0) label += ` · ~${d.tokens_saved_est.toLocaleString()} tokens saved`;
+  } else if (d.kind === "history_trim") {
+    label += ` · history trim`;
+    if (d.messages_dropped > 0) label += ` · ${d.messages_dropped} messages dropped`;
+  } else if (d.kind === "manual" || d.kind === "manual_requested") {
+    label += ` · manual trigger`;
+  }
+
+  row.innerHTML = `<span style="opacity:0.9">${_esc(label)}</span>`;
+  return row;
+}
+
 function _buildRow(entry) {
+  // Compaction events get their own badge row
+  if (entry.event_type === "compaction") {
+    return _buildCompactionRow(entry);
+  }
+
   const row = document.createElement("div");
   row.className = "tl-entry";
   row.dataset.eventType = entry.event_type;

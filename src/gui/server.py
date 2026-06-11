@@ -51,6 +51,9 @@ class BudgetUpdateRequest(BaseModel):
     field: str
     value: float
 
+class CompactRequest(BaseModel):
+    pass
+
 
 # ------------------------------------------------------------------ #
 #  WebSocket connection manager                                        #
@@ -100,13 +103,7 @@ def create_app(gui: GuiApp, event_bus: EventBus) -> FastAPI:
     async def _emit_connection_update() -> None:
         """Emit a connections_update event to all connected clients."""
         try:
-            event = AgentEvent(
-                timestamp=0,
-                agent_name="orchestrator",
-                event_type="connections_update",
-                data={"active": manager.get_count()},
-            )
-            event_bus.emit_sync(event)
+            event_bus.emit_sync("orchestrator", "connections_update", active=manager.get_count())
         except Exception as exc:
             logger.error("Failed to emit connections_update event: %s", exc)
 
@@ -215,5 +212,11 @@ def create_app(gui: GuiApp, event_bus: EventBus) -> FastAPI:
     async def set_budget(req: BudgetUpdateRequest) -> dict[str, Any]:
         result = gui._handle_budget_set(req.field, str(req.value))
         return {"result": result}
+
+    @app.post("/api/compact")
+    async def compact_context() -> dict[str, Any]:
+        gui.orchestrator.request_compact()
+        await event_bus.emit("orchestrator", "compaction", kind="manual_requested", messages_dropped=0, tokens_saved_est=0)
+        return {"ok": True, "message": "Compact requested"}
 
     return app

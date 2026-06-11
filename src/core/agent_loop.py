@@ -72,8 +72,18 @@ class BaseAgent:
         self.llm = llm_client
         self.tracker = token_tracker
         self.tools = tool_registry
-        self.context = ContextManager(config.context)
         self._event_bus = event_bus
+        self._compact_requested = asyncio.Event()
+        self.context = ContextManager(config.context, emit_fn=self._emit_sync_compaction)
+
+    def request_compact(self) -> None:
+        """Signal the run loop to perform an aggressive history trim next iteration."""
+        self._compact_requested.set()
+
+    def _emit_sync_compaction(self, event_type: str, **data) -> None:
+        """Sync bridge: fires compaction event onto EventBus without awaiting."""
+        if self._event_bus is not None:
+            self._event_bus.emit_sync(self.name, event_type, **data)
 
     async def _emit(self, event_type: str, **data) -> None:
         """Emit a GUI event if an event bus is wired in; no-op otherwise."""
@@ -306,6 +316,15 @@ class BaseAgent:
 
             # Trim history if approaching context limit
             messages = self.context.trim_history(messages)
+
+            # Manual compact requested: force aggressive trim at half budget
+            if self._compact_requested.is_set():
+                self._compact_requested.clear()
+                messages = self.context.trim_history(
+                    messages,
+                    max_tokens=self.config.context.max_history_tokens // 2,
+                )
+                await self._emit("compaction", kind="manual", messages_dropped=0, tokens_saved_est=0)
 
         # Max iterations exhausted
         logger.warning("[%s] Max iterations (%d) reached", self.name, _max_iters)

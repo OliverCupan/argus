@@ -67,6 +67,45 @@ function _dispatch(event) {
   if (event_type === "task_complete") {
     window.ArgusDashboard?.taskEnd();
   }
+
+  // Compaction notification toast
+  if (event_type === "compaction") {
+    const d = data || {};
+    let msg = "⚡ Context compacted";
+    if (d.kind === "manual" || d.kind === "manual_requested") msg = "⚡ Manual compact triggered";
+    else if (d.kind === "tool_output") msg = `⚡ Tool output compacted (tier ${d.tier})`;
+    else if (d.kind === "history_trim") msg = `⚡ History trimmed (${d.messages_dropped || 0} messages)`;
+    _showToast(msg);
+  }
+}
+
+function _showToast(message) {
+  let container = document.getElementById("toast-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "toast-container";
+    container.style.cssText = [
+      "position:fixed", "top:56px", "right:16px", "z-index:9999",
+      "display:flex", "flex-direction:column", "gap:8px", "pointer-events:none"
+    ].join(";");
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement("div");
+  toast.style.cssText = [
+    "background:#2a1a4a", "color:#c084fc",
+    "border:1px solid #7c3aed", "border-radius:6px",
+    "padding:8px 14px", "font-size:12px",
+    "opacity:1", "transition:opacity 0.4s ease",
+    "white-space:nowrap"
+  ].join(";");
+  toast.textContent = message;
+
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    setTimeout(() => toast.remove(), 400);
+  }, 2000);
 }
 
 // ── Settings panel ─────────────────────────────────────────────
@@ -158,6 +197,19 @@ function _boot() {
 
   _initConnectionBadge();
   _connectWS();
+
+  // Compact button
+  document.getElementById("compact-btn")
+    ?.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/compact", { method: "POST" });
+        if (res.ok) {
+          _showToast("⚡ Compact requested");
+        }
+      } catch (err) {
+        console.error("[Argus] Compact request failed:", err);
+      }
+    });
 
   // Settings panel open/close
   document.getElementById("settings-btn")

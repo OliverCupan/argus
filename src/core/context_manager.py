@@ -34,8 +34,13 @@ _MAX_CHARS_BEFORE_COMPACTION = 400_000
 
 
 class ContextManager:
-    def __init__(self, config: ContextConfig):
+    def __init__(self, config: ContextConfig, emit_fn=None):
         self.config = config
+        self._emit_fn = emit_fn  # optional sync callable(event_type, **data)
+
+    def _emit_compaction(self, **data) -> None:
+        if self._emit_fn is not None:
+            self._emit_fn("compaction", **data)
 
     # ------------------------------------------------------------------ #
     #  Tool output compaction                                              #
@@ -134,7 +139,10 @@ class ContextManager:
                 self.config.compaction_model,
             )
 
-        return f"[Compacted tier-{tier}]\n{response.content}"
+        summary = f"[Compacted tier-{tier}]\n{response.content}"
+        tokens_saved_est = self.estimate_tokens(text) - self.estimate_tokens(summary)
+        self._emit_compaction(kind="tool_output", tier=tier, tokens_saved_est=max(0, tokens_saved_est))
+        return summary
 
     async def compact_injected_context(
         self,
@@ -266,6 +274,7 @@ class ContextManager:
 
         result = [first_msg] + remaining
         logger.debug("History trimmed: %d → %d messages", len(messages), len(result))
+        self._emit_compaction(kind="history_trim", messages_dropped=len(drop_idx), tokens_saved_est=0)
         return result
 
     # ------------------------------------------------------------------ #
