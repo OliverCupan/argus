@@ -90,7 +90,6 @@ PROJECT_PATH=/path/to/your/project docker compose up
 argus > fix the login endpoint to validate email format
 argus > add rate limiting to the /api/search endpoint
 argus > audit src/
-argus > audit demo/buggy_app
 argus > fix 3
 argus > stats
 argus > exit
