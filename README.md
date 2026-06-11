@@ -178,6 +178,4 @@ argus/
 │   └── agents/
 │       ├── orchestrator.py
 │       └── definitions.py      # All 7 agent definitions as AgentDefinition dataclasses
-└── demo/
-    └── buggy_app/
 ```
