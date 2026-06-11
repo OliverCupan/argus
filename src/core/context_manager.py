@@ -141,7 +141,13 @@ class ContextManager:
 
         summary = f"[Compacted tier-{tier}]\n{response.content}"
         tokens_saved_est = self.estimate_tokens(text) - self.estimate_tokens(summary)
-        self._emit_compaction(kind="tool_output", tier=tier, tokens_saved_est=max(0, tokens_saved_est))
+        self._emit_compaction(
+            kind="tool_output",
+            tier=tier,
+            tokens_saved_est=max(0, tokens_saved_est),
+            before=text[:2000],          # cap at 2000 chars for the UI
+            after=response.content[:1000],
+        )
         return summary
 
     async def compact_injected_context(

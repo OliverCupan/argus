@@ -66,20 +66,35 @@ function _isVisible(entry) {
   return _filterCategory(entry.event_type) === _activeFilter;
 }
 
-function _buildCompactionRow(entry) {
+function _buildBudgetRow(entry) {
   const row = document.createElement("div");
-  row.className = "tl-compact-badge";
-  row.dataset.eventType = "compaction";
+  row.className = "tl-budget-badge";
+  row.dataset.eventType = "budget_exceeded";
   row.style.cssText = [
     "display:flex", "align-items:center", "justify-content:center",
     "padding:6px 16px", "margin:4px 0",
-    "background:#1e0d3a", "border-top:1px solid #4c1d95",
-    "border-bottom:1px solid #4c1d95", "border-radius:4px",
-    "font-size:11px", "color:#c084fc", "letter-spacing:0.3px",
+    "background:#3a0d0d", "border-top:1px solid #991b1b",
+    "border-bottom:1px solid #991b1b", "border-radius:4px",
+    "font-size:11px", "color:#fca5a5", "letter-spacing:0.3px",
     "font-style:italic"
   ].join(";");
 
   const d = entry.data || {};
+  const reasons = {
+    hard_cap:      "hard cap reached — agent stopped",
+    soft_cap:      "soft cap reached — agent winding down",
+    per_agent_cap: "per-agent limit reached — agent stopped",
+    max_iterations: "max iterations reached — agent stopped",
+  };
+  const label = `🛑 Budget: ${reasons[d.reason] || d.reason || "limit reached"} (${entry.agent_name})`;
+  row.innerHTML = `<span style="opacity:0.9">${_esc(label)}</span>`;
+  return row;
+}
+
+function _buildCompactionRow(entry) {
+  const d = entry.data || {};
+  const hasDiff = d.kind === "tool_output" && (d.before || d.after);
+
   let label = "⚡ Context compacted";
   if (d.kind === "tool_output") {
     label += ` · tool output tier-${d.tier}`;
@@ -90,12 +105,61 @@ function _buildCompactionRow(entry) {
   } else if (d.kind === "manual" || d.kind === "manual_requested") {
     label += ` · manual trigger`;
   }
+  if (hasDiff) label += ` — click to expand`;
 
-  row.innerHTML = `<span style="opacity:0.9">${_esc(label)}</span>`;
+  const row = document.createElement("div");
+  row.className = "tl-compact-badge";
+  row.dataset.eventType = "compaction";
+
+  const headerStyle = [
+    "display:flex", "align-items:center", "justify-content:center",
+    "padding:6px 16px",
+    "background:#1e0d3a", "border-top:1px solid #4c1d95",
+    "border-bottom:1px solid #4c1d95", "border-radius:4px",
+    "font-size:11px", "color:#c084fc", "letter-spacing:0.3px",
+    "font-style:italic",
+    hasDiff ? "cursor:pointer" : ""
+  ].join(";");
+
+  row.innerHTML = `<div class="tl-compact-header" style="${headerStyle}">
+    <span style="opacity:0.9">${_esc(label)}</span>
+    ${hasDiff ? `<span class="tl-compact-chevron" style="margin-left:8px;font-style:normal;font-size:10px">▼</span>` : ""}
+  </div>`;
+
+  if (hasDiff) {
+    const body = document.createElement("div");
+    body.className = "tl-compact-body";
+    body.style.cssText = [
+      "display:none",
+      "background:#120822", "border:1px solid #4c1d95", "border-top:none",
+      "border-radius:0 0 4px 4px", "padding:10px 14px",
+      "font-size:11px", "font-family:var(--font-mono,monospace)",
+      "overflow-x:auto"
+    ].join(";");
+
+    body.innerHTML =
+      `<div style="color:#a78bfa;font-weight:600;margin-bottom:6px">BEFORE — raw tool output</div>` +
+      `<pre style="color:#e2d9f3;white-space:pre-wrap;margin:0 0 14px">${_esc(d.before || "")}</pre>` +
+      `<div style="color:#34d399;font-weight:600;margin-bottom:6px">AFTER — Haiku summary</div>` +
+      `<pre style="color:#a7f3d0;white-space:pre-wrap;margin:0">${_esc(d.after || "")}</pre>`;
+
+    row.appendChild(body);
+
+    row.querySelector(".tl-compact-header").addEventListener("click", () => {
+      const open = body.style.display !== "none";
+      body.style.display = open ? "none" : "block";
+      const chev = row.querySelector(".tl-compact-chevron");
+      if (chev) chev.textContent = open ? "▼" : "▲";
+    });
+  }
+
   return row;
 }
 
 function _buildRow(entry) {
+  if (entry.event_type === "budget_exceeded") {
+    return _buildBudgetRow(entry);
+  }
   // Compaction events get their own badge row
   if (entry.event_type === "compaction") {
     return _buildCompactionRow(entry);
